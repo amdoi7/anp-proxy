@@ -1,0 +1,80 @@
+# ANP Proxy Configuration Example
+
+# Operating mode: "gateway", "receiver", or "both"
+mode = "both"
+
+# Enable debug mode
+debug = false
+
+[logging]
+level = "INFO"
+format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+# file = "anp-proxy.log"  # Optional log file
+# max_size = "10MB"
+# backup_count = 5
+
+[gateway]
+# HTTP server settings
+host = "0.0.0.0"
+port = 8080
+
+# WebSocket server settings
+wss_host = "0.0.0.0"
+wss_port = 8765
+
+# Connection limits
+max_connections = 100
+timeout = 30.0
+keepalive_timeout = 60.0
+
+# Protocol settings
+chunk_size = 65536  # 64KB
+ping_interval = 10.0
+
+[gateway.tls]
+enabled = false
+# cert_file = "server.crt"
+# key_file = "server.key"
+# ca_file = "ca.crt"
+verify_mode = "required"  # none, optional, required
+
+[gateway.auth]
+enabled = true
+# shared_secret = "your-secret-key-here"
+token_expiry = 3600  # 1 hour
+max_attempts = 3
+
+[receiver]
+# Gateway connection
+gateway_url = "wss://localhost:8765"
+
+# Local application settings
+local_host = "127.0.0.1"
+local_port = 8000
+# local_app_module = "myapp:app"  # ASGI app module
+
+# Connection settings
+timeout = 30.0
+keepalive_interval = 60.0
+ping_interval = 10.0
+
+# Reconnection settings
+reconnect_enabled = true
+reconnect_delay = 5.0
+max_reconnect_attempts = 10
+
+# Protocol settings
+chunk_size = 65536  # 64KB
+
+[receiver.tls]
+enabled = false
+# cert_file = "client.crt"
+# key_file = "client.key"
+# ca_file = "ca.crt"
+verify_mode = "required"
+
+[receiver.auth]
+enabled = true
+# shared_secret = "your-secret-key-here"
+token_expiry = 3600
+max_attempts = 3
