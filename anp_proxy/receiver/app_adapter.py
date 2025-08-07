@@ -3,8 +3,6 @@
 from collections.abc import Callable
 from typing import Any
 
-import httpx
-
 from ..common.log_base import get_logger
 from ..protocol import ANPXMessage, HTTPMeta, ResponseMeta
 
@@ -45,7 +43,7 @@ class ASGIAdapter:
         """
         self.app = app
         self.base_url = base_url.rstrip('/')
-        self.client = httpx.AsyncClient(base_url=base_url)
+        # No need for httpx client as we call ASGI directly
 
         logger.info("ASGI adapter initialized", base_url=base_url)
 
@@ -237,7 +235,7 @@ class ASGIAdapter:
 
     async def close(self) -> None:
         """Close the ASGI adapter and cleanup resources."""
-        await self.client.aclose()
+        # No HTTP client to close since we call ASGI directly
         logger.info("ASGI adapter closed")
 
 

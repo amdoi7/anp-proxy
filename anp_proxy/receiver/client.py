@@ -218,8 +218,20 @@ class ReceiverClient:
                 timeout=self.config.timeout
             )
 
+            # Handle both string and bytes responses
+            if isinstance(response, bytes):
+                logger.error("Received binary data during auth handshake", data_hex=response.hex())
+                return False
+
             response_data = json.loads(response)
-            return response_data.get("status") == "authenticated"
+            success = response_data.get("status") == "authenticated"
+
+            if success:
+                logger.info("Authentication successful (auth disabled)")
+            else:
+                logger.error("Authentication failed", response=response_data)
+
+            return success
 
         try:
             # Send authentication credentials
@@ -256,20 +268,33 @@ class ReceiverClient:
                     # Receive message
                     message = await self.websocket.recv()
 
+                    logger.debug(
+                        "Received message",
+                        message_type=type(message).__name__,
+                        size=len(message) if hasattr(message, '__len__') else "unknown"
+                    )
+
                     if isinstance(message, str):
                         # Control message
                         await self._handle_control_message(message)
-                    else:
+                    elif isinstance(message, bytes):
                         # Binary ANPX message
                         if self.message_handler:
                             await self.message_handler.handle_message(message)
+                        else:
+                            logger.warning("Received binary message but no message handler available")
+                    else:
+                        logger.warning("Received unknown message type", message_type=type(message))
 
                 except websockets.exceptions.ConnectionClosed:
                     logger.info("WebSocket connection closed")
                     break
+                except Exception as msg_error:
+                    logger.error("Error processing individual message", error=str(msg_error), error_type=type(msg_error).__name__)
+                    # Continue processing other messages
 
         except Exception as e:
-            logger.error("Error in message loop", error=str(e))
+            logger.error("Error in message loop", error=str(e), error_type=type(e).__name__)
         finally:
             self.connected = False
             self.reconnect_manager.on_connection_lost()

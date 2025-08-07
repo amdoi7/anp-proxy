@@ -123,7 +123,7 @@ class WebSocketManager:
 
         return context
 
-    async def _handle_connection(self, websocket: WebSocketServerProtocol, path: str) -> None:
+    async def _handle_connection(self, websocket: WebSocketServerProtocol) -> None:
         """Handle a new WebSocket connection."""
         connection_id = str(uuid.uuid4())
         client_info = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
@@ -161,7 +161,30 @@ class WebSocketManager:
         if not self.config.auth.enabled:
             conn_info.authenticated = True
             conn_info.user_id = "anonymous"
-            return True
+
+            # Still need to handle the auth message from receiver and send response
+            try:
+                # Wait for auth message from receiver
+                auth_message = await asyncio.wait_for(
+                    conn_info.websocket.recv(),
+                    timeout=self.config.timeout
+                )
+
+                # Send success response even though auth is disabled
+                import json
+                response = json.dumps({"status": "authenticated", "auth_disabled": True})
+                await conn_info.websocket.send(response)
+
+                logger.info(
+                    "Connection authenticated (auth disabled)",
+                    connection_id=conn_info.connection_id,
+                    user_id=conn_info.user_id
+                )
+                return True
+
+            except Exception as e:
+                logger.error("Failed to handle auth handshake", connection_id=conn_info.connection_id, error=str(e))
+                return False
 
         try:
             # Wait for authentication message

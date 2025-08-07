@@ -101,11 +101,12 @@ class ANPXHeader:
             self.body_crc
         )
 
-        # Calculate and insert header CRC
+        # Calculate and insert header CRC (first 12 bytes)
         from .crc import calculate_crc32
         header_crc = calculate_crc32(header_data[:12])
 
-        return struct.pack(
+        # Encode final header with calculated CRC
+        final_header = struct.pack(
             "!4sBBBBIII",
             self.MAGIC,
             self.VERSION,
@@ -117,14 +118,21 @@ class ANPXHeader:
             self.body_crc
         )
 
+        # Ensure header is exactly 24 bytes by adding padding if needed
+        if len(final_header) < self.HEADER_SIZE:
+            final_header += b'\x00' * (self.HEADER_SIZE - len(final_header))
+
+        return final_header[:self.HEADER_SIZE]
+
     @classmethod
     def decode(cls, data: bytes) -> "ANPXHeader":
         """Decode header from 24 bytes."""
         if len(data) < cls.HEADER_SIZE:
             raise ValueError(f"Header data must be {cls.HEADER_SIZE} bytes")
 
+        # Unpack the core 20-byte structure first
         magic, version, msg_type, flags, reserved, total_len, header_crc, body_crc = struct.unpack(
-            "!4sBBBBIII", data[:cls.HEADER_SIZE]
+            "!4sBBBBIII", data[:20]
         )
 
         if magic != cls.MAGIC:
@@ -133,10 +141,9 @@ class ANPXHeader:
         if version != cls.VERSION:
             raise ValueError(f"Unsupported version: {version}")
 
-        # Verify header CRC
+        # Verify header CRC (first 12 bytes)
         from .crc import verify_crc32
-        header_without_crc = data[:12] + b"\x00\x00\x00\x00" + data[16:20]
-        if not verify_crc32(header_without_crc[:12], header_crc):
+        if not verify_crc32(data[:12], header_crc):
             raise ValueError("Header CRC validation failed")
 
         return cls(
@@ -216,7 +223,7 @@ class ANPXMessage:
 
     def _update_total_length(self) -> None:
         """Update header total_length based on current TLV fields."""
-        body_size = sum(5 + field.length for field in self.tlv_fields)  # Tag(1) + Len(4) + Value
+        body_size = sum(5 + tlv_field.length for tlv_field in self.tlv_fields)  # Tag(1) + Len(4) + Value
         self.header.total_length = ANPXHeader.HEADER_SIZE + body_size
 
     def add_tlv_field(self, tag: TLVTag, value: str | bytes | int) -> None:
@@ -233,9 +240,9 @@ class ANPXMessage:
 
     def get_tlv_field(self, tag: TLVTag) -> TLVField | None:
         """Get first TLV field with specified tag."""
-        for field in self.tlv_fields:
-            if field.tag == tag:
-                return field
+        for tlv_field in self.tlv_fields:
+            if tlv_field.tag == tag:
+                return tlv_field
         return None
 
     def get_tlv_value_str(self, tag: TLVTag) -> str | None:
@@ -291,8 +298,8 @@ class ANPXMessage:
     def encode_body(self) -> bytes:
         """Encode TLV body to bytes."""
         body = b""
-        for field in self.tlv_fields:
-            body += field.encode()
+        for tlv_field in self.tlv_fields:
+            body += tlv_field.encode()
         return body
 
     def encode(self) -> bytes:

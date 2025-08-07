@@ -40,11 +40,25 @@ class MessageHandler:
             message_data: Raw ANPX message bytes
         """
         try:
+            logger.debug(
+                "Received raw message",
+                size=len(message_data),
+                first_16_bytes=message_data[:16].hex() if len(message_data) >= 16 else message_data.hex()
+            )
+
             # Decode message
             message = self.decoder.decode_message(message_data)
             if not message:
                 # Chunked message not complete yet
+                logger.debug("Chunked message not complete yet")
                 return
+
+            logger.debug(
+                "Message decoded successfully",
+                message_type=message.header.message_type,
+                total_length=message.header.total_length,
+                tlv_count=len(message.tlv_fields)
+            )
 
             # Handle based on message type
             if message.header.message_type == MessageType.HTTP_REQUEST:
@@ -58,7 +72,13 @@ class MessageHandler:
                 )
 
         except Exception as e:
-            logger.error("Failed to handle message", error=str(e))
+            logger.error(
+                "Failed to handle message",
+                error=str(e),
+                error_type=type(e).__name__,
+                message_size=len(message_data),
+                first_32_bytes=message_data[:32].hex() if len(message_data) >= 32 else message_data.hex()
+            )
             # Try to send error response if we can extract request_id
             try:
                 partial_message = self._try_decode_partial(message_data)
@@ -66,8 +86,8 @@ class MessageHandler:
                     request_id = partial_message.get_request_id()
                     if request_id:
                         await self._send_error_response(request_id, str(e))
-            except Exception:
-                pass  # Best effort error handling
+            except Exception as decode_error:
+                logger.error("Failed to decode partial message for error response", error=str(decode_error))
 
     def _try_decode_partial(self, message_data: bytes) -> ANPXMessage | None:
         """Try to decode partial message to extract request_id."""
