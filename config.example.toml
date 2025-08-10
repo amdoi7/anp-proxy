@@ -43,6 +43,10 @@ enabled = true
 # shared_secret = "your-secret-key-here"
 token_expiry = 3600  # 1 hour
 max_attempts = 3
+# DID-WBA settings
+did_wba_enabled = false
+# did = "did:key:z6Mk..."
+# allowed_dids = ["did:key:z6Mk..."]
 
 [receiver]
 # Gateway connection
@@ -78,3 +82,9 @@ enabled = true
 # shared_secret = "your-secret-key-here"
 token_expiry = 3600
 max_attempts = 3
+# DID-WBA settings (client needs doc and key to build header)
+did_wba_enabled = false
+# did = "did:key:z6Mk..."
+# did_document_path = "./did_info/did.json"
+# private_key_path = "./did_info/key-1_private.pem"
+# nonce_window_seconds = 300

@@ -25,7 +25,7 @@ class ColoredFormatter(logging.Formatter):
         levelname = record.levelname
         message = super().format(record)
         color = self.COLORS.get(levelname, self.COLORS["RESET"])
-        return color + message + self.COLORS["RESET"]
+        return color + message + self.COLORS["RESET"] + "\n"
 
 
 def setup_logging(config: LogConfig) -> None:
@@ -43,11 +43,21 @@ def setup_logging(config: LogConfig) -> None:
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
 
-    # Create formatters with file and line number information
+    # Create formatters; ensure filename and line number are included
     log_format = config.format
-    if "%(filename)s" not in log_format:
-        # Add location info if not present
-        log_format = '[%(asctime)s] %(levelname)-8s %(filename)s:%(lineno)d: %(message)s'
+    has_filename = "%(filename)" in log_format
+    has_lineno = "%(lineno)" in log_format
+    if not (has_filename and has_lineno):
+        if "%(message)s" in log_format:
+            log_format = log_format.replace(
+                "%(message)s", "%(filename)s:%(lineno)d: %(message)s"
+            )
+        else:
+            # Fallback: append location info
+            log_format = f"{log_format} %(filename)s:%(lineno)d"
+
+    # Add newline to format
+    log_format = log_format + "\n"
 
     formatter = logging.Formatter(log_format, datefmt="%Y-%m-%d %H:%M:%S")
     colored_formatter = ColoredFormatter(log_format, datefmt="%Y-%m-%d %H:%M:%S")
@@ -80,6 +90,12 @@ def setup_logging(config: LogConfig) -> None:
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
             structlog.stdlib.PositionalArgumentsFormatter(),
+            structlog.processors.CallsiteParameterAdder(
+                parameters=[
+                    structlog.processors.CallsiteParameter.FILENAME,
+                    structlog.processors.CallsiteParameter.LINENO,
+                ]
+            ),
             structlog.processors.TimeStamper(fmt="ISO"),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,

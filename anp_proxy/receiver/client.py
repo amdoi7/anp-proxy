@@ -10,6 +10,7 @@ from websockets.client import WebSocketClientProtocol
 
 from ..common.auth import AuthManager
 from ..common.config import ReceiverConfig
+from ..common.did_wba import build_auth_headers
 from ..common.log_base import get_logger
 from ..common.utils import GracefulShutdown, import_app
 from .app_adapter import ASGIAdapter, MockASGIApp
@@ -149,16 +150,35 @@ class ReceiverClient:
             # Create SSL context if needed
             ssl_context = self._create_ssl_context() if self.config.tls.enabled else None
 
+            # Optional DID-WBA headers on handshake using agent_connect
+            extra_headers: dict[str, str] = build_auth_headers(self.config.auth, self.config.gateway_url)
+            if extra_headers:
+                # websockets expects a list of tuples or a CIMultiDict-like as HeadersLike
+                # Convert dict to list of (key, value)
+                extra_headers = {k: v for k, v in extra_headers.items()}
+
             # Connect to gateway
-            self.websocket = await websockets.connect(
-                self.config.gateway_url,
+            connect_kwargs = dict(
                 ssl=ssl_context,
                 ping_interval=self.config.ping_interval,
                 ping_timeout=self.config.timeout,
                 close_timeout=self.config.timeout,
                 max_size=None,  # No size limit for large transfers
-                compression=None  # Disable compression for binary protocol
+                compression=None,  # Disable compression for binary protocol
             )
+            if extra_headers:
+                # websockets.HeadersLike supports dict, list of tuples, or CIMultiDict
+                # Pass dict directly as extra_headers
+                self.websocket = await websockets.connect(
+                    self.config.gateway_url,
+                    extra_headers=extra_headers,
+                    **connect_kwargs,
+                )
+            else:
+                self.websocket = await websockets.connect(
+                    self.config.gateway_url,
+                    **connect_kwargs,
+                )
 
             # Authenticate connection
             if not await self._authenticate():
@@ -207,6 +227,10 @@ class ReceiverClient:
 
     async def _authenticate(self) -> bool:
         """Authenticate with the gateway."""
+        # If DID-WBA is enabled, handshake headers already carried auth
+        if self.config.auth.did_wba_enabled:
+            logger.info("Skipping JSON auth: DID-WBA enabled")
+            return True
         if not self.config.auth.enabled:
             # Send minimal auth message for non-authenticated mode
             auth_data = {"auth_enabled": False}

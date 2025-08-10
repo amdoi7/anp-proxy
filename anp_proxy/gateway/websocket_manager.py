@@ -10,6 +10,7 @@ from websockets.server import WebSocketServerProtocol
 
 from ..common.auth import AuthManager
 from ..common.config import GatewayConfig
+from ..common.did_wba import DidWbaVerifier
 from ..common.log_base import get_logger
 from ..protocol import ANPXDecoder, ANPXEncoder, ANPXMessage, MessageType
 
@@ -48,6 +49,7 @@ class WebSocketManager:
         self.request_routing: dict[str, str] = {}  # request_id -> connection_id
         self._server = None
         self._cleanup_task = None
+        self._did_wba_verifier = DidWbaVerifier(config.auth)
 
         logger.info("WebSocket manager initialized")
 
@@ -137,10 +139,14 @@ class WebSocketManager:
                 websocket=websocket
             )
 
-            # Authenticate connection
-            if not await self._authenticate_connection(conn_info):
-                await websocket.close(code=4001, reason="Authentication failed")
-                return
+            # Authenticate connection (DID-WBA via headers first if enabled)
+            if self.config.auth.did_wba_enabled:
+                did_result = await self._verify_did_headers(websocket)
+                if not did_result.success:
+                    await websocket.close(code=4003, reason="DID authentication failed")
+                    return
+                conn_info.authenticated = True
+                conn_info.user_id = did_result.did or "did-user"
 
             # Add to connections
             self.connections[connection_id] = conn_info
@@ -226,6 +232,24 @@ class WebSocketManager:
         except Exception as e:
             logger.error("Authentication failed", connection_id=conn_info.connection_id, error=str(e))
             return False
+
+    async def _verify_did_headers(self, websocket: WebSocketServerProtocol):
+        """Verify DID-WBA headers during WS handshake."""
+        try:
+            # Extract domain from websocket host
+            domain = websocket.host or self.config.wss_host
+            logger.info(f"Verifying DID-WBA headers {websocket.host} {self.config.wss_host}")
+
+            result = await self._did_wba_verifier.verify(websocket.request_headers, domain)
+            if result.success:
+                logger.info("DID-WBA authenticated", did=result.did)
+            else:
+                logger.warning("DID-WBA auth failed", error=result.error)
+            return result
+        except Exception as e:
+            logger.error("DID-WBA verification error", error=str(e))
+            from ..common.did_wba import DidAuthResult
+            return DidAuthResult(success=False, error=str(e))
 
     async def _message_loop(self, conn_info: ConnectionInfo) -> None:
         """Handle messages from a WebSocket connection."""
