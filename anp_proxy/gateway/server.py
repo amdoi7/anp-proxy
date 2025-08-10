@@ -7,7 +7,6 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 
-from ..common.auth import AuthManager
 from ..common.config import GatewayConfig
 from ..common.log_base import get_logger
 from ..common.utils import GracefulShutdown
@@ -35,10 +34,9 @@ class GatewayServer:
             config: Gateway configuration
         """
         self.config = config
-        self.auth_manager = AuthManager(config.auth)
 
         # Initialize components
-        self.websocket_manager = WebSocketManager(config, self.auth_manager)
+        self.websocket_manager = WebSocketManager(config)
         self.request_mapper = RequestMapper(config.chunk_size)
         self.response_handler = ResponseHandler(config.timeout)
 

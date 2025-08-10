@@ -2,13 +2,11 @@
 
 import asyncio
 import json
-import ssl
 from typing import Any
 
 import websockets
 from websockets.client import WebSocketClientProtocol
 
-from ..common.auth import AuthManager
 from ..common.config import ReceiverConfig
 from ..common.did_wba import build_auth_headers
 from ..common.log_base import get_logger
@@ -32,7 +30,6 @@ class ReceiverClient:
             app: Optional ASGI app (will load from config if None)
         """
         self.config = config
-        self.auth_manager = AuthManager(config.auth)
 
         # WebSocket connection
         self.websocket: WebSocketClientProtocol | None = None
@@ -147,9 +144,6 @@ class ReceiverClient:
         try:
             logger.info("Connecting to gateway", url=self.config.gateway_url)
 
-            # Create SSL context if needed
-            ssl_context = self._create_ssl_context() if self.config.tls.enabled else None
-
             # Optional DID-WBA headers on handshake using agent_connect
             extra_headers: dict[str, str] = build_auth_headers(self.config.auth, self.config.gateway_url)
             if extra_headers:
@@ -159,7 +153,6 @@ class ReceiverClient:
 
             # Connect to gateway
             connect_kwargs = dict(
-                ssl=ssl_context,
                 ping_interval=self.config.ping_interval,
                 ping_timeout=self.config.timeout,
                 close_timeout=self.config.timeout,
@@ -180,12 +173,6 @@ class ReceiverClient:
                     **connect_kwargs,
                 )
 
-            # Authenticate connection
-            if not await self._authenticate():
-                await self.websocket.close()
-                self.websocket = None
-                return False
-
             self.connected = True
 
             # Start message handling tasks
@@ -200,88 +187,6 @@ class ReceiverClient:
             if self.websocket:
                 await self.websocket.close()
                 self.websocket = None
-            return False
-
-    def _create_ssl_context(self) -> ssl.SSLContext:
-        """Create SSL context for secure connection."""
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-
-        # Load client certificate if provided
-        if self.config.tls.cert_file and self.config.tls.key_file:
-            context.load_cert_chain(self.config.tls.cert_file, self.config.tls.key_file)
-
-        # Load CA certificate if provided
-        if self.config.tls.ca_file:
-            context.load_verify_locations(self.config.tls.ca_file)
-
-        # Set verification mode
-        if self.config.tls.verify_mode == "none":
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_NONE
-        elif self.config.tls.verify_mode == "optional":
-            context.verify_mode = ssl.CERT_OPTIONAL
-        else:
-            context.verify_mode = ssl.CERT_REQUIRED
-
-        return context
-
-    async def _authenticate(self) -> bool:
-        """Authenticate with the gateway."""
-        # If DID-WBA is enabled, handshake headers already carried auth
-        if self.config.auth.did_wba_enabled:
-            logger.info("Skipping JSON auth: DID-WBA enabled")
-            return True
-        if not self.config.auth.enabled:
-            # Send minimal auth message for non-authenticated mode
-            auth_data = {"auth_enabled": False}
-            await self.websocket.send(json.dumps(auth_data))
-
-            # Wait for response
-            response = await asyncio.wait_for(
-                self.websocket.recv(),
-                timeout=self.config.timeout
-            )
-
-            # Handle both string and bytes responses
-            if isinstance(response, bytes):
-                logger.error("Received binary data during auth handshake", data_hex=response.hex())
-                return False
-
-            response_data = json.loads(response)
-            success = response_data.get("status") == "authenticated"
-
-            if success:
-                logger.info("Authentication successful (auth disabled)")
-            else:
-                logger.error("Authentication failed", response=response_data)
-
-            return success
-
-        try:
-            # Send authentication credentials
-            auth_data = {
-                "shared_secret": self.auth_manager.shared_secret,
-                "user_id": "receiver_client"
-            }
-
-            await self.websocket.send(json.dumps(auth_data))
-
-            # Wait for authentication response
-            response = await asyncio.wait_for(
-                self.websocket.recv(),
-                timeout=self.config.timeout
-            )
-
-            response_data = json.loads(response)
-            if response_data.get("status") == "authenticated":
-                logger.info("Authentication successful")
-                return True
-            else:
-                logger.error("Authentication failed", response=response_data)
-                return False
-
-        except Exception as e:
-            logger.error("Authentication error", error=str(e))
             return False
 
     async def _message_loop(self) -> None:

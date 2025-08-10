@@ -8,7 +8,6 @@ from typing import Any
 import websockets
 from websockets.server import WebSocketServerProtocol
 
-from ..common.auth import AuthManager
 from ..common.config import GatewayConfig
 from ..common.did_wba import DidWbaVerifier
 from ..common.log_base import get_logger
@@ -33,16 +32,14 @@ class ConnectionInfo:
 class WebSocketManager:
     """Manages WebSocket connections from receivers."""
 
-    def __init__(self, config: GatewayConfig, auth_manager: AuthManager) -> None:
+    def __init__(self, config: GatewayConfig) -> None:
         """
         Initialize WebSocket manager.
 
         Args:
             config: Gateway configuration
-            auth_manager: Authentication manager
         """
         self.config = config
-        self.auth_manager = auth_manager
         self.connections: dict[str, ConnectionInfo] = {}
         self.decoder = ANPXDecoder()
         self.encoder = ANPXEncoder(config.chunk_size)
@@ -60,7 +57,6 @@ class WebSocketManager:
                 self._handle_connection,
                 self.config.wss_host,
                 self.config.wss_port,
-                ssl=self._create_ssl_context() if self.config.tls.enabled else None,
                 ping_interval=self.config.ping_interval,
                 ping_timeout=self.config.timeout,
                 max_size=None,  # No size limit for large file transfers
@@ -103,28 +99,6 @@ class WebSocketManager:
 
         logger.info("WebSocket server stopped")
 
-    def _create_ssl_context(self):
-        """Create SSL context for secure WebSocket connections."""
-        import ssl
-
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-
-        if self.config.tls.cert_file and self.config.tls.key_file:
-            context.load_cert_chain(self.config.tls.cert_file, self.config.tls.key_file)
-
-        if self.config.tls.ca_file:
-            context.load_verify_locations(self.config.tls.ca_file)
-
-        # Set verification mode
-        if self.config.tls.verify_mode == "required":
-            context.verify_mode = ssl.CERT_REQUIRED
-        elif self.config.tls.verify_mode == "optional":
-            context.verify_mode = ssl.CERT_OPTIONAL
-        else:
-            context.verify_mode = ssl.CERT_NONE
-
-        return context
-
     async def _handle_connection(self, websocket: WebSocketServerProtocol) -> None:
         """Handle a new WebSocket connection."""
         connection_id = str(uuid.uuid4())
@@ -147,6 +121,10 @@ class WebSocketManager:
                     return
                 conn_info.authenticated = True
                 conn_info.user_id = did_result.did or "did-user"
+            else:
+                # DID-WBA is disabled; allow connection as anonymous
+                conn_info.authenticated = True
+                conn_info.user_id = "anonymous"
 
             # Add to connections
             self.connections[connection_id] = conn_info
@@ -161,77 +139,6 @@ class WebSocketManager:
         finally:
             # Cleanup connection
             await self._cleanup_connection(connection_id)
-
-    async def _authenticate_connection(self, conn_info: ConnectionInfo) -> bool:
-        """Authenticate a WebSocket connection."""
-        if not self.config.auth.enabled:
-            conn_info.authenticated = True
-            conn_info.user_id = "anonymous"
-
-            # Still need to handle the auth message from receiver and send response
-            try:
-                # Wait for auth message from receiver
-                auth_message = await asyncio.wait_for(
-                    conn_info.websocket.recv(),
-                    timeout=self.config.timeout
-                )
-
-                # Send success response even though auth is disabled
-                import json
-                response = json.dumps({"status": "authenticated", "auth_disabled": True})
-                await conn_info.websocket.send(response)
-
-                logger.info(
-                    "Connection authenticated (auth disabled)",
-                    connection_id=conn_info.connection_id,
-                    user_id=conn_info.user_id
-                )
-                return True
-
-            except Exception as e:
-                logger.error("Failed to handle auth handshake", connection_id=conn_info.connection_id, error=str(e))
-                return False
-
-        try:
-            # Wait for authentication message
-            auth_message = await asyncio.wait_for(
-                conn_info.websocket.recv(),
-                timeout=self.config.timeout
-            )
-
-            # TODO: Parse authentication credentials from message
-            # For now, use simple token-based auth
-            import json
-            auth_data = json.loads(auth_message)
-
-            client_id = f"{conn_info.websocket.remote_address[0]}"
-            token = self.auth_manager.authenticate_connection(client_id, auth_data)
-
-            if token:
-                token_data = self.auth_manager.verify_token(token)
-                if token_data:
-                    conn_info.authenticated = True
-                    conn_info.user_id = token_data.user_id
-
-                    # Send success response
-                    response = json.dumps({"status": "authenticated", "token": token})
-                    await conn_info.websocket.send(response)
-
-                    logger.info(
-                        "Connection authenticated",
-                        connection_id=conn_info.connection_id,
-                        user_id=conn_info.user_id
-                    )
-                    return True
-
-            # Send failure response
-            response = json.dumps({"status": "authentication_failed"})
-            await conn_info.websocket.send(response)
-            return False
-
-        except Exception as e:
-            logger.error("Authentication failed", connection_id=conn_info.connection_id, error=str(e))
-            return False
 
     async def _verify_did_headers(self, websocket: WebSocketServerProtocol):
         """Verify DID-WBA headers during WS handshake."""
