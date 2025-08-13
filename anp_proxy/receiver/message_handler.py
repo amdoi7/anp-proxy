@@ -43,7 +43,9 @@ class MessageHandler:
             logger.debug(
                 "Received raw message",
                 size=len(message_data),
-                first_16_bytes=message_data[:16].hex() if len(message_data) >= 16 else message_data.hex()
+                first_16_bytes=message_data[:16].hex()
+                if len(message_data) >= 16
+                else message_data.hex(),
             )
 
             # Decode message
@@ -57,7 +59,7 @@ class MessageHandler:
                 "Message decoded successfully",
                 message_type=message.header.message_type,
                 total_length=message.header.total_length,
-                tlv_count=len(message.tlv_fields)
+                tlv_count=len(message.tlv_fields),
             )
 
             # Handle based on message type
@@ -67,8 +69,7 @@ class MessageHandler:
                 await self._handle_error_message(message)
             else:
                 logger.warning(
-                    "Unsupported message type",
-                    message_type=message.header.message_type
+                    "Unsupported message type", message_type=message.header.message_type
                 )
 
         except Exception as e:
@@ -77,7 +78,9 @@ class MessageHandler:
                 error=str(e),
                 error_type=type(e).__name__,
                 message_size=len(message_data),
-                first_32_bytes=message_data[:32].hex() if len(message_data) >= 32 else message_data.hex()
+                first_32_bytes=message_data[:32].hex()
+                if len(message_data) >= 32
+                else message_data.hex(),
             )
             # Try to send error response if we can extract request_id
             try:
@@ -87,7 +90,10 @@ class MessageHandler:
                     if request_id:
                         await self._send_error_response(request_id, str(e))
             except Exception as decode_error:
-                logger.error("Failed to decode partial message for error response", error=str(decode_error))
+                logger.error(
+                    "Failed to decode partial message for error response",
+                    error=str(decode_error),
+                )
 
     def _try_decode_partial(self, message_data: bytes) -> ANPXMessage | None:
         """Try to decode partial message to extract request_id."""
@@ -97,8 +103,8 @@ class MessageHandler:
             if len(message_data) < ANPXHeader.HEADER_SIZE:
                 return None
 
-            header = ANPXHeader.decode(message_data[:ANPXHeader.HEADER_SIZE])
-            body_data = message_data[ANPXHeader.HEADER_SIZE:]
+            header = ANPXHeader.decode(message_data[: ANPXHeader.HEADER_SIZE])
+            body_data = message_data[ANPXHeader.HEADER_SIZE :]
 
             # Try to extract just the request_id TLV
             if len(body_data) >= 5:  # Tag(1) + Length(4)
@@ -129,19 +135,21 @@ class MessageHandler:
             await self._send_response(response_message)
 
         except Exception as e:
-            logger.error("Failed to process HTTP request", request_id=request_id, error=str(e))
+            logger.error(
+                "Failed to process HTTP request", request_id=request_id, error=str(e)
+            )
             await self._send_error_response(request_id, str(e))
 
     async def _handle_error_message(self, message: ANPXMessage) -> None:
         """Handle error message from gateway."""
         request_id = message.get_request_id()
         error_body = message.get_http_body()
-        error_text = error_body.decode('utf-8') if error_body else "Unknown error"
+        error_text = error_body.decode("utf-8") if error_body else "Unknown error"
 
         logger.warning(
             "Received error message from gateway",
             request_id=request_id,
-            error=error_text
+            error=error_text,
         )
 
     async def _send_response(self, message: ANPXMessage) -> None:
@@ -169,7 +177,4 @@ class MessageHandler:
         """Get message handler statistics."""
         decoder_stats = self.decoder.get_pending_chunks()
 
-        return {
-            "pending_chunks": len(decoder_stats),
-            "chunk_details": decoder_stats
-        }
+        return {"pending_chunks": len(decoder_stats), "chunk_details": decoder_stats}

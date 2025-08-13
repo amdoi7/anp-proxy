@@ -8,6 +8,7 @@ from enum import IntEnum
 
 class MessageType(IntEnum):
     """ANPX Message Types."""
+
     HTTP_REQUEST = 0x01
     HTTP_RESPONSE = 0x02
     ERROR = 0xFF
@@ -15,6 +16,7 @@ class MessageType(IntEnum):
 
 class TLVTag(IntEnum):
     """TLV Tag definitions."""
+
     REQUEST_ID = 0x01
     HTTP_META = 0x02
     HTTP_BODY = 0x03
@@ -27,6 +29,7 @@ class TLVTag(IntEnum):
 @dataclass
 class TLVField:
     """Represents a single TLV field."""
+
     tag: TLVTag
     value: bytes
 
@@ -50,12 +53,12 @@ class TLVField:
         if len(data) < offset + 5:  # Tag(1) + Length(4)
             raise ValueError("Insufficient data for TLV header")
 
-        tag, length = struct.unpack("!BI", data[offset:offset + 5])
+        tag, length = struct.unpack("!BI", data[offset : offset + 5])
 
         if len(data) < offset + 5 + length:
             raise ValueError("Insufficient data for TLV value")
 
-        value = data[offset + 5:offset + 5 + length]
+        value = data[offset + 5 : offset + 5 + length]
 
         return cls(TLVTag(tag), value), offset + 5 + length
 
@@ -98,11 +101,12 @@ class ANPXHeader:
             0,  # Reserved
             self.total_length,
             0,  # Placeholder for header_crc
-            self.body_crc
+            self.body_crc,
         )
 
         # Calculate and insert header CRC (first 12 bytes)
         from .crc import calculate_crc32
+
         header_crc = calculate_crc32(header_data[:12])
 
         # Encode final header with calculated CRC
@@ -115,14 +119,14 @@ class ANPXHeader:
             0,  # Reserved
             self.total_length,
             header_crc,
-            self.body_crc
+            self.body_crc,
         )
 
         # Ensure header is exactly 24 bytes by adding padding if needed
         if len(final_header) < self.HEADER_SIZE:
-            final_header += b'\x00' * (self.HEADER_SIZE - len(final_header))
+            final_header += b"\x00" * (self.HEADER_SIZE - len(final_header))
 
-        return final_header[:self.HEADER_SIZE]
+        return final_header[: self.HEADER_SIZE]
 
     @classmethod
     def decode(cls, data: bytes) -> "ANPXHeader":
@@ -131,8 +135,8 @@ class ANPXHeader:
             raise ValueError(f"Header data must be {cls.HEADER_SIZE} bytes")
 
         # Unpack the core 20-byte structure first
-        magic, version, msg_type, flags, reserved, total_len, header_crc, body_crc = struct.unpack(
-            "!4sBBBBIII", data[:20]
+        magic, version, msg_type, flags, reserved, total_len, header_crc, body_crc = (
+            struct.unpack("!4sBBBBIII", data[:20])
         )
 
         if magic != cls.MAGIC:
@@ -143,6 +147,7 @@ class ANPXHeader:
 
         # Verify header CRC (first 12 bytes)
         from .crc import verify_crc32
+
         if not verify_crc32(data[:12], header_crc):
             raise ValueError("Header CRC validation failed")
 
@@ -151,13 +156,14 @@ class ANPXHeader:
             flags=flags,
             total_length=total_len,
             header_crc=header_crc,
-            body_crc=body_crc
+            body_crc=body_crc,
         )
 
 
 @dataclass
 class HTTPMeta:
     """HTTP request metadata."""
+
     method: str
     path: str
     headers: dict[str, str] = field(default_factory=dict)
@@ -169,7 +175,7 @@ class HTTPMeta:
             "method": self.method,
             "path": self.path,
             "headers": self.headers,
-            "query": self.query
+            "query": self.query,
         })
 
     @classmethod
@@ -180,13 +186,14 @@ class HTTPMeta:
             method=data["method"],
             path=data["path"],
             headers=data.get("headers", {}),
-            query=data.get("query", {})
+            query=data.get("query", {}),
         )
 
 
 @dataclass
 class ResponseMeta:
     """HTTP response metadata."""
+
     status: int
     reason: str = ""
     headers: dict[str, str] = field(default_factory=dict)
@@ -196,7 +203,7 @@ class ResponseMeta:
         return json.dumps({
             "status": self.status,
             "reason": self.reason,
-            "headers": self.headers
+            "headers": self.headers,
         })
 
     @classmethod
@@ -206,7 +213,7 @@ class ResponseMeta:
         return cls(
             status=data["status"],
             reason=data.get("reason", ""),
-            headers=data.get("headers", {})
+            headers=data.get("headers", {}),
         )
 
 
@@ -223,13 +230,15 @@ class ANPXMessage:
 
     def _update_total_length(self) -> None:
         """Update header total_length based on current TLV fields."""
-        body_size = sum(5 + tlv_field.length for tlv_field in self.tlv_fields)  # Tag(1) + Len(4) + Value
+        body_size = sum(
+            5 + tlv_field.length for tlv_field in self.tlv_fields
+        )  # Tag(1) + Len(4) + Value
         self.header.total_length = ANPXHeader.HEADER_SIZE + body_size
 
     def add_tlv_field(self, tag: TLVTag, value: str | bytes | int) -> None:
         """Add a TLV field to the message."""
         if isinstance(value, str):
-            value_bytes = value.encode('utf-8')
+            value_bytes = value.encode("utf-8")
         elif isinstance(value, int):
             value_bytes = struct.pack("!I", value)
         else:
@@ -248,7 +257,7 @@ class ANPXMessage:
     def get_tlv_value_str(self, tag: TLVTag) -> str | None:
         """Get TLV field value as string."""
         field = self.get_tlv_field(tag)
-        return field.value.decode('utf-8') if field else None
+        return field.value.decode("utf-8") if field else None
 
     def get_tlv_value_int(self, tag: TLVTag) -> int | None:
         """Get TLV field value as integer."""
@@ -291,7 +300,7 @@ class ANPXMessage:
         chunk_tot = self.get_tlv_value_int(TLVTag.CHUNK_TOT)
 
         final_field = self.get_tlv_field(TLVTag.FINAL_CHUNK)
-        is_final = bool(final_field and final_field.value == b'\x01')
+        is_final = bool(final_field and final_field.value == b"\x01")
 
         return chunk_idx, chunk_tot, is_final
 
@@ -309,6 +318,7 @@ class ANPXMessage:
 
         # Update header with body CRC
         from .crc import calculate_crc32
+
         self.header.body_crc = calculate_crc32(body)
         self._update_total_length()
 

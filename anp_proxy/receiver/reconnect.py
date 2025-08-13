@@ -14,6 +14,7 @@ logger = get_logger(__name__)
 
 class ConnectionState(Enum):
     """Connection states for reconnection manager."""
+
     DISCONNECTED = "disconnected"
     CONNECTING = "connecting"
     CONNECTED = "connected"
@@ -45,7 +46,9 @@ class ReconnectManager:
         """Set callback function for connection attempts."""
         self.connect_callback = callback
 
-    def set_state_change_callback(self, callback: Callable[[ConnectionState], None]) -> None:
+    def set_state_change_callback(
+        self, callback: Callable[[ConnectionState], None]
+    ) -> None:
         """Set callback for state changes."""
         self.state_change_callback = callback
 
@@ -55,7 +58,11 @@ class ReconnectManager:
             old_state = self.state
             self.state = new_state
 
-            logger.info("Connection state changed", old_state=old_state.value, new_state=new_state.value)
+            logger.info(
+                "Connection state changed",
+                old_state=old_state.value,
+                new_state=new_state.value,
+            )
 
             if self.state_change_callback:
                 try:
@@ -124,7 +131,7 @@ class ReconnectManager:
         if self.current_attempt >= self.config.max_reconnect_attempts:
             logger.error(
                 "Maximum reconnection attempts reached",
-                max_attempts=self.config.max_reconnect_attempts
+                max_attempts=self.config.max_reconnect_attempts,
             )
             self._set_state(ConnectionState.FAILED)
             return
@@ -135,23 +142,23 @@ class ReconnectManager:
     async def _reconnect_loop(self) -> None:
         """Reconnection loop with exponential backoff."""
         while (
-            self.config.reconnect_enabled and
-            self.current_attempt < self.config.max_reconnect_attempts and
-            self.state == ConnectionState.RECONNECTING
+            self.config.reconnect_enabled
+            and self.current_attempt < self.config.max_reconnect_attempts
+            and self.state == ConnectionState.RECONNECTING
         ):
             self.current_attempt += 1
 
             # Calculate delay with exponential backoff
             delay = min(
                 self.config.reconnect_delay * (2 ** (self.current_attempt - 1)),
-                300  # Cap at 5 minutes
+                300,  # Cap at 5 minutes
             )
 
             logger.info(
                 "Attempting reconnection",
                 attempt=self.current_attempt,
                 max_attempts=self.config.max_reconnect_attempts,
-                delay=f"{delay:.1f}s"
+                delay=f"{delay:.1f}s",
             )
 
             await asyncio.sleep(delay)
@@ -172,7 +179,7 @@ class ReconnectManager:
                         logger.info(
                             "Reconnection successful",
                             attempt=self.current_attempt,
-                            total_time=f"{time.time() - (self.last_connected_time or 0):.1f}s"
+                            total_time=f"{time.time() - (self.last_connected_time or 0):.1f}s",
                         )
                         return
                     else:
@@ -224,5 +231,5 @@ class ReconnectManager:
             "max_attempts": self.config.max_reconnect_attempts,
             "reconnect_enabled": self.config.reconnect_enabled,
             "uptime_seconds": uptime,
-            "last_connected_time": self.last_connected_time
+            "last_connected_time": self.last_connected_time,
         }

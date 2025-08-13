@@ -37,6 +37,21 @@ class TLSConfig(BaseModel):
         return v
 
 
+class DatabaseConfig(BaseModel):
+    """Database configuration for service discovery (did_services table only)."""
+
+    enabled: bool = False
+    host: str = "localhost"
+    port: int = 3306
+    user: str = "anp_user"
+    password: str = ""
+    database: str = "anp_proxy"
+    min_connections: int = 5
+    max_connections: int = 20
+    charset: str = "utf8mb4"
+    connect_timeout: float = 10.0
+
+
 class AuthConfig(BaseModel):
     """Authentication configuration."""
 
@@ -100,6 +115,13 @@ class GatewayConfig(BaseModel):
     chunk_size: int = DEFAULT_CHUNK_SIZE
     ping_interval: float = DEFAULT_PING_INTERVAL
 
+    # Database for service discovery
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+
+    # Smart routing configuration
+    enable_smart_routing: bool = True
+    service_cache_ttl: int = 300  # Service discovery cache TTL in seconds
+
 
 class ReceiverConfig(BaseModel):
     """Receiver-specific configuration."""
@@ -128,6 +150,11 @@ class ReceiverConfig(BaseModel):
 
     # Protocol settings
     chunk_size: int = DEFAULT_CHUNK_SIZE
+
+    # Service advertising - list of service URLs this receiver handles
+    advertised_services: list[str] = Field(
+        default_factory=list
+    )  # e.g., ["https://api.example.com/v1", "https://chat.example.com"]
 
 
 class ANPConfig(BaseSettings):

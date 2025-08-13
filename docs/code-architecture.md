@@ -172,7 +172,7 @@ proxy.run_both()  # 同时启动 Gateway 和 Receiver
 
 ## 架构优势
 
-**✅ 框架无关**：Protocol 层完全独立，Gateway/Receiver 可适配任意框架  
-**✅ 全量转发**：完整封装 HTTP 五元组，支持分片传输  
-**✅ 安全可靠**：WSS + 双向认证 + CRC 校验 + 断线重连  
+**✅ 框架无关**：Protocol 层完全独立，Gateway/Receiver 可适配任意框架
+**✅ 全量转发**：完整封装 HTTP 五元组，支持分片传输
+**✅ 安全可靠**：WSS + 双向认证 + CRC 校验 + 断线重连
 **✅ 高性能异步**：纯异步架构，单连接多并发，无磁盘落地

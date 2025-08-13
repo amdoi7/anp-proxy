@@ -39,17 +39,17 @@ class ANPProxyTester:
             wss_host="127.0.0.1",
             wss_port=self.wss_port,
             auth=AuthConfig(enabled=False),  # Disable authentication
-            tls=TLSConfig(enabled=False),    # Disable TLS for testing
+            tls=TLSConfig(enabled=False),  # Disable TLS for testing
             max_connections=10,
-            timeout=30.0
+            timeout=30.0,
         )
 
         receiver_config = ReceiverConfig(
             gateway_url=f"ws://127.0.0.1:{self.wss_port}",  # Use ws for testing
             auth=AuthConfig(enabled=False),  # Disable authentication
-            tls=TLSConfig(enabled=False),    # Disable TLS for testing
+            tls=TLSConfig(enabled=False),  # Disable TLS for testing
             reconnect_delay=1.0,
-            max_reconnect_attempts=3
+            max_reconnect_attempts=3,
         )
 
         # Create components
@@ -101,7 +101,9 @@ class ANPProxyTester:
         print("\n📡 Testing basic GET request...")
 
         try:
-            async with httpx.AsyncClient(timeout=10.0, proxy=None, trust_env=False) as client:
+            async with httpx.AsyncClient(
+                timeout=10.0, proxy=None, trust_env=False
+            ) as client:
                 response = await client.get(f"http://127.0.0.1:{self.gateway_port}/")
 
                 assert response.status_code == 200
@@ -122,8 +124,12 @@ class ANPProxyTester:
         print("\n🩺 Testing health check...")
 
         try:
-            async with httpx.AsyncClient(timeout=10.0, proxy=None, trust_env=False) as client:
-                response = await client.get(f"http://127.0.0.1:{self.gateway_port}/health")
+            async with httpx.AsyncClient(
+                timeout=10.0, proxy=None, trust_env=False
+            ) as client:
+                response = await client.get(
+                    f"http://127.0.0.1:{self.gateway_port}/health"
+                )
 
                 assert response.status_code == 200
                 data = response.json()
@@ -142,15 +148,21 @@ class ANPProxyTester:
         print("\n🛤️  Testing path parameters...")
 
         try:
-            async with httpx.AsyncClient(timeout=10.0, proxy=None, trust_env=False) as client:
-                response = await client.get(f"http://127.0.0.1:{self.gateway_port}/echo/test-item?q=test-query")
+            async with httpx.AsyncClient(
+                timeout=10.0, proxy=None, trust_env=False
+            ) as client:
+                response = await client.get(
+                    f"http://127.0.0.1:{self.gateway_port}/echo/test-item?q=test-query"
+                )
 
                 assert response.status_code == 200
                 data = response.json()
                 assert data["item"] == "test-item"
                 assert data["query"] == "test-query"
 
-                print(f"✅ GET /echo/test-item?q=test-query - Status: {response.status_code}")
+                print(
+                    f"✅ GET /echo/test-item?q=test-query - Status: {response.status_code}"
+                )
                 print(f"   Response: {data}")
                 return True
 
@@ -165,10 +177,11 @@ class ANPProxyTester:
         try:
             test_data = {"name": "ANP Proxy", "version": "1.0", "test": True}
 
-            async with httpx.AsyncClient(timeout=10.0, proxy=None, trust_env=False) as client:
+            async with httpx.AsyncClient(
+                timeout=10.0, proxy=None, trust_env=False
+            ) as client:
                 response = await client.post(
-                    f"http://127.0.0.1:{self.gateway_port}/echo",
-                    json=test_data
+                    f"http://127.0.0.1:{self.gateway_port}/echo", json=test_data
                 )
 
                 assert response.status_code == 200
@@ -185,16 +198,18 @@ class ANPProxyTester:
             print(f"❌ POST request failed: {e}")
             return False
 
-
-
     async def test_slow_response(self):
         """Test slow response to verify timeout handling."""
         print("\n🐌 Testing slow response...")
 
         try:
-            async with httpx.AsyncClient(timeout=15.0, proxy=None, trust_env=False) as client:
+            async with httpx.AsyncClient(
+                timeout=15.0, proxy=None, trust_env=False
+            ) as client:
                 start_time = time.time()
-                response = await client.get(f"http://127.0.0.1:{self.gateway_port}/slow-response")
+                response = await client.get(
+                    f"http://127.0.0.1:{self.gateway_port}/slow-response"
+                )
                 elapsed = time.time() - start_time
 
                 assert response.status_code == 200

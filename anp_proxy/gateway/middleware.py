@@ -26,7 +26,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             method=request.method,
             url=str(request.url),
             client_ip=client_ip,
-            user_agent=request.headers.get("user-agent", "unknown")
+            user_agent=request.headers.get("user-agent", "unknown"),
         )
 
         try:
@@ -39,7 +39,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                 url=str(request.url),
                 status_code=response.status_code,
                 process_time=f"{process_time:.3f}s",
-                client_ip=client_ip
+                client_ip=client_ip,
             )
 
             # Add processing time header
@@ -55,7 +55,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                 url=str(request.url),
                 error=str(e),
                 process_time=f"{process_time:.3f}s",
-                client_ip=client_ip
+                client_ip=client_ip,
             )
             raise
 
@@ -86,22 +86,23 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 "Rate limit exceeded",
                 client_ip=client_ip,
                 max_requests=self.max_requests,
-                window_seconds=self.window_seconds
+                window_seconds=self.window_seconds,
             )
 
             from starlette.responses import JSONResponse
+
             return JSONResponse(
                 status_code=429,
                 content={
                     "error": "Rate limit exceeded",
                     "max_requests": self.max_requests,
-                    "window_seconds": self.window_seconds
+                    "window_seconds": self.window_seconds,
                 },
                 headers={
                     "Retry-After": str(int(self.window_seconds)),
                     "X-RateLimit-Limit": str(self.max_requests),
-                    "X-RateLimit-Window": str(self.window_seconds)
-                }
+                    "X-RateLimit-Window": str(self.window_seconds),
+                },
             )
 
         return await call_next(request)
@@ -116,7 +117,7 @@ class CORSMiddleware(BaseHTTPMiddleware):
         allow_origins: list = None,
         allow_methods: list = None,
         allow_headers: list = None,
-        allow_credentials: bool = True
+        allow_credentials: bool = True,
     ):
         """
         Initialize CORS middleware.
@@ -131,11 +132,24 @@ class CORSMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.allow_origins = allow_origins or ["*"]
         self.allow_methods = allow_methods or [
-            "GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"
+            "GET",
+            "POST",
+            "PUT",
+            "DELETE",
+            "OPTIONS",
+            "HEAD",
+            "PATCH",
         ]
         self.allow_headers = allow_headers or [
-            "accept", "accept-encoding", "authorization", "content-type",
-            "dnt", "origin", "user-agent", "x-csrftoken", "x-requested-with"
+            "accept",
+            "accept-encoding",
+            "authorization",
+            "content-type",
+            "dnt",
+            "origin",
+            "user-agent",
+            "x-csrftoken",
+            "x-requested-with",
         ]
         self.allow_credentials = allow_credentials
 

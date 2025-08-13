@@ -2,9 +2,7 @@
 name = "anp-proxy"
 version = "0.1.0"
 description = "Agent Network Proxy - HTTP over WebSocket tunneling for private networks"
-authors = [
-    {name = "Your Name", email = "your.email@example.com"}
-]
+authors = [{ name = "Your Name", email = "your.email@example.com" }]
 dependencies = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
@@ -21,6 +19,8 @@ dependencies = [
     "cryptography>=41.0.0",
     "aiohttp>=3.9.0",
     "agent_connect",
+    "PyMySQL>=1.1.0",
+    "python-dotenv>=1.0.0",
 ]
 readme = "README.md"
 requires-python = ">= 3.11"
@@ -39,30 +39,39 @@ dev = [
     "ruff>=0.1.0",
 ]
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.black]
-line-length = 88
-target-version = ['py311']
-
-[tool.isort]
-profile = "black"
-line_length = 88
-
-[tool.mypy]
-python_version = "3.11"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-
 [tool.ruff]
 target-version = "py311"
 line-length = 88
+
+[tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 ignore = ["E501"]
 
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+# Preview features for better formatting
+preview = true
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+force-wrap-aliases = true
+split-on-trailing-comma = true
+
+# Enable more strict formatting rules
+[tool.ruff.lint.flake8-comprehensions]
+allow-dict-calls-with-keyword-arguments = false
+
+[dependency-groups]
+dev = ["pre-commit>=4.3.0"]

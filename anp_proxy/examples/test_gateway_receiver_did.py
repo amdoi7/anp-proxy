@@ -121,7 +121,7 @@ class DidWbaTester:
         print("\n🔐 Testing DID-WBA handshake...")
         try:
             assert self.gateway is not None
-            stats = self.gateway.websocket_manager.get_connection_stats()
+            stats = await self.gateway.websocket_manager.get_connection_stats()
             # Expect at least one authenticated connection
             ok = stats.get("authenticated_connections", 0) >= 1
             if ok:
@@ -136,7 +136,9 @@ class DidWbaTester:
     async def test_basic_request(self) -> bool:
         print("\n📡 Testing basic GET request through gateway...")
         try:
-            async with httpx.AsyncClient(timeout=10.0, proxy=None, trust_env=False) as client:
+            async with httpx.AsyncClient(
+                timeout=10.0, proxy=None, trust_env=False
+            ) as client:
                 r = await client.get(f"http://127.0.0.1:{self.gateway_port}/")
                 if r.status_code != 200:
                     print(f"❌ Unexpected status: {r.status_code}, body={r.text}")
@@ -180,5 +182,3 @@ async def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(asyncio.run(main()))
-
-

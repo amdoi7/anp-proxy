@@ -12,14 +12,14 @@ from .log_base import get_logger
 
 logger = get_logger(__name__)
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 def retry_async(
     max_attempts: int = 3,
     delay: float = 1.0,
     backoff: float = 2.0,
-    exceptions: tuple = (Exception,)
+    exceptions: tuple = (Exception,),
 ) -> Callable:
     """
     Decorator for async functions with retry logic.
@@ -30,6 +30,7 @@ def retry_async(
         backoff: Backoff multiplier for delay
         exceptions: Tuple of exceptions to catch and retry
     """
+
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> T:
@@ -45,7 +46,7 @@ def retry_async(
                         logger.warning(
                             f"Attempt {attempt + 1} failed, retrying in {current_delay}s",
                             function=func.__name__,
-                            error=str(e)
+                            error=str(e),
                         )
                         await asyncio.sleep(current_delay)
                         current_delay *= backoff
@@ -53,12 +54,13 @@ def retry_async(
                         logger.error(
                             f"All {max_attempts} attempts failed",
                             function=func.__name__,
-                            error=str(e)
+                            error=str(e),
                         )
 
             raise last_exception
 
         return wrapper
+
     return decorator
 
 
@@ -69,6 +71,7 @@ def timeout_async(seconds: float) -> Callable:
     Args:
         seconds: Timeout in seconds
     """
+
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> T:
@@ -79,6 +82,7 @@ def timeout_async(seconds: float) -> Callable:
                 raise
 
         return wrapper
+
     return decorator
 
 
@@ -234,8 +238,7 @@ class RateLimiter:
         else:
             # Remove requests outside current window
             self.requests[key] = [
-                req_time for req_time in self.requests[key]
-                if req_time > window_start
+                req_time for req_time in self.requests[key] if req_time > window_start
             ]
 
         # Check if under limit
@@ -252,8 +255,7 @@ class RateLimiter:
 
         for key in list(self.requests.keys()):
             self.requests[key] = [
-                req_time for req_time in self.requests[key]
-                if req_time > window_start
+                req_time for req_time in self.requests[key] if req_time > window_start
             ]
 
             # Remove empty entries
@@ -271,7 +273,7 @@ def format_bytes(num_bytes: int) -> str:
     Returns:
         Formatted string (e.g., "1.5 MB")
     """
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
         if num_bytes < 1024.0:
             return f"{num_bytes:.1f} {unit}"
         num_bytes /= 1024.0

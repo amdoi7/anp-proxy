@@ -25,7 +25,7 @@ class MockResponse:
             201: "Created",
             400: "Bad Request",
             404: "Not Found",
-            500: "Internal Server Error"
+            500: "Internal Server Error",
         }
         return reasons.get(status_code, "Unknown")
 
@@ -42,7 +42,7 @@ class ASGIAdapter:
             base_url: Base URL for internal requests
         """
         self.app = app
-        self.base_url = base_url.rstrip('/')
+        self.base_url = base_url.rstrip("/")
         # No need for httpx client as we call ASGI directly
 
         logger.info("ASGI adapter initialized", base_url=base_url)
@@ -72,7 +72,7 @@ class ASGIAdapter:
                 "Processing ASGI request",
                 request_id=request_id,
                 method=http_meta.method,
-                path=http_meta.path
+                path=http_meta.path,
             )
 
             # Make internal ASGI request
@@ -85,7 +85,7 @@ class ASGIAdapter:
                 "ASGI request processed",
                 request_id=request_id,
                 status=response.status_code,
-                response_size=len(response.content)
+                response_size=len(response.content),
             )
 
             return anpx_response
@@ -93,14 +93,11 @@ class ASGIAdapter:
         except Exception as e:
             logger.error("Failed to process ASGI request", error=str(e))
             return self._create_error_response(
-                message.get_request_id() or "unknown",
-                str(e)
+                message.get_request_id() or "unknown", str(e)
             )
 
     async def _make_internal_request(
-        self,
-        http_meta: HTTPMeta,
-        body: bytes | None
+        self, http_meta: HTTPMeta, body: bytes | None
     ) -> "MockResponse":
         """
         Make internal ASGI request to app.
@@ -138,11 +135,7 @@ class ASGIAdapter:
 
         # Prepare receive callable
         async def receive():
-            return {
-                "type": "http.request",
-                "body": body or b"",
-                "more_body": False
-            }
+            return {"type": "http.request", "body": body or b"", "more_body": False}
 
         # Prepare send callable to capture response
         response_data = {"status": 500, "headers": [], "body": b""}
@@ -161,13 +154,11 @@ class ASGIAdapter:
         return MockResponse(
             status_code=response_data["status"],
             headers=dict((k.decode(), v.decode()) for k, v in response_data["headers"]),
-            content=response_data["body"]
+            content=response_data["body"],
         )
 
     async def _convert_to_anpx_response(
-        self,
-        request_id: str,
-        response: MockResponse
+        self, request_id: str, response: MockResponse
     ) -> ANPXMessage:
         """
         Convert mock response to ANPX response message.
@@ -185,7 +176,7 @@ class ASGIAdapter:
         resp_meta = ResponseMeta(
             status=response.status_code,
             reason=response.reason_phrase,
-            headers=dict(response.headers)
+            headers=dict(response.headers),
         )
 
         # Create ANPX response message
@@ -202,7 +193,9 @@ class ASGIAdapter:
 
         return anpx_response
 
-    def _create_error_response(self, request_id: str, error_message: str) -> ANPXMessage:
+    def _create_error_response(
+        self, request_id: str, error_message: str
+    ) -> ANPXMessage:
         """
         Create error response message.
 
@@ -219,7 +212,7 @@ class ASGIAdapter:
         resp_meta = ResponseMeta(
             status=500,
             reason="Internal Server Error",
-            headers={"content-type": "text/plain"}
+            headers={"content-type": "text/plain"},
         )
 
         # Create ANPX response message
@@ -229,7 +222,7 @@ class ASGIAdapter:
         # Add TLV fields
         anpx_response.add_tlv_field(TLVTag.REQUEST_ID, request_id)
         anpx_response.add_tlv_field(TLVTag.RESP_META, resp_meta.to_json())
-        anpx_response.add_tlv_field(TLVTag.HTTP_BODY, error_message.encode('utf-8'))
+        anpx_response.add_tlv_field(TLVTag.HTTP_BODY, error_message.encode("utf-8"))
 
         return anpx_response
 
@@ -251,14 +244,13 @@ class MockASGIApp:
             await send({
                 "type": "http.response.start",
                 "status": 404,
-                "headers": [(b"content-type", b"text/plain")]
+                "headers": [(b"content-type", b"text/plain")],
             })
-            await send({
-                "type": "http.response.body",
-                "body": b"Not Found"
-            })
+            await send({"type": "http.response.body", "body": b"Not Found"})
 
-    async def _handle_http(self, scope: dict, receive: Callable, send: Callable) -> None:
+    async def _handle_http(
+        self, scope: dict, receive: Callable, send: Callable
+    ) -> None:
         """Handle HTTP request."""
         method = scope["method"]
         path = scope["path"]
@@ -271,11 +263,8 @@ class MockASGIApp:
             "status": 200,
             "headers": [
                 (b"content-type", b"text/plain"),
-                (b"content-length", str(len(response_body)).encode())
-            ]
+                (b"content-length", str(len(response_body)).encode()),
+            ],
         })
 
-        await send({
-            "type": "http.response.body",
-            "body": response_body
-        })
+        await send({"type": "http.response.body", "body": response_body})

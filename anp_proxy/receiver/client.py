@@ -65,7 +65,9 @@ class ReceiverClient:
             self.asgi_adapter = ASGIAdapter(self.app, base_url)
 
             # Initialize message handler
-            self.message_handler = MessageHandler(self.asgi_adapter, self.config.chunk_size)
+            self.message_handler = MessageHandler(
+                self.asgi_adapter, self.config.chunk_size
+            )
             self.message_handler.set_send_callback(self._send_message)
 
             # Connect to gateway
@@ -145,7 +147,9 @@ class ReceiverClient:
             logger.info("Connecting to gateway", url=self.config.gateway_url)
 
             # Optional DID-WBA headers on handshake using agent_connect
-            extra_headers: dict[str, str] = build_auth_headers(self.config.auth, self.config.gateway_url)
+            extra_headers: dict[str, str] = build_auth_headers(
+                self.config.auth, self.config.gateway_url
+            )
             if extra_headers:
                 # websockets expects a list of tuples or a CIMultiDict-like as HeadersLike
                 # Convert dict to list of (key, value)
@@ -175,6 +179,10 @@ class ReceiverClient:
 
             self.connected = True
 
+            # Send service registration message if advertised services are configured
+            if self.config.advertised_services:
+                await self._send_service_registration()
+
             # Start message handling tasks
             self._message_task = asyncio.create_task(self._message_loop())
             self._ping_task = asyncio.create_task(self._ping_loop())
@@ -200,7 +208,7 @@ class ReceiverClient:
                     logger.debug(
                         "Received message",
                         message_type=type(message).__name__,
-                        size=len(message) if hasattr(message, '__len__') else "unknown"
+                        size=len(message) if hasattr(message, "__len__") else "unknown",
                     )
 
                     if isinstance(message, str):
@@ -211,19 +219,29 @@ class ReceiverClient:
                         if self.message_handler:
                             await self.message_handler.handle_message(message)
                         else:
-                            logger.warning("Received binary message but no message handler available")
+                            logger.warning(
+                                "Received binary message but no message handler available"
+                            )
                     else:
-                        logger.warning("Received unknown message type", message_type=type(message))
+                        logger.warning(
+                            "Received unknown message type", message_type=type(message)
+                        )
 
-                except websockets.exceptions.ConnectionClosed:
+                except websockets.ConnectionClosed:
                     logger.info("WebSocket connection closed")
                     break
                 except Exception as msg_error:
-                    logger.error("Error processing individual message", error=str(msg_error), error_type=type(msg_error).__name__)
+                    logger.error(
+                        "Error processing individual message",
+                        error=str(msg_error),
+                        error_type=type(msg_error).__name__,
+                    )
                     # Continue processing other messages
 
         except Exception as e:
-            logger.error("Error in message loop", error=str(e), error_type=type(e).__name__)
+            logger.error(
+                "Error in message loop", error=str(e), error_type=type(e).__name__
+            )
         finally:
             self.connected = False
             self.reconnect_manager.on_connection_lost()
@@ -250,11 +268,11 @@ class ReceiverClient:
                     try:
                         ping_data = {
                             "type": "ping",
-                            "timestamp": asyncio.get_event_loop().time()
+                            "timestamp": asyncio.get_event_loop().time(),
                         }
                         await self.websocket.send(json.dumps(ping_data))
 
-                    except websockets.exceptions.ConnectionClosed:
+                    except websockets.ConnectionClosed:
                         break
                     except Exception as e:
                         logger.warning("Failed to send ping", error=str(e))
@@ -277,6 +295,23 @@ class ReceiverClient:
             logger.error("Failed to send message", error=str(e))
             raise
 
+    async def _send_service_registration(self) -> None:
+        """Send service registration message to gateway."""
+        try:
+            registration_message = {
+                "type": "service_registration",
+                "advertised_services": self.config.advertised_services,
+            }
+
+            await self.websocket.send(json.dumps(registration_message))
+
+            logger.info(
+                "Sent service registration", services=self.config.advertised_services
+            )
+
+        except Exception as e:
+            logger.error("Failed to send service registration", error=str(e))
+
     def _on_state_change(self, new_state: ConnectionState) -> None:
         """Handle connection state changes."""
         if new_state == ConnectionState.CONNECTED:
@@ -293,7 +328,7 @@ class ReceiverClient:
         stats = {
             "connected": self.connected,
             "gateway_url": self.config.gateway_url,
-            "reconnect": self.reconnect_manager.get_stats()
+            "reconnect": self.reconnect_manager.get_stats(),
         }
 
         if self.message_handler:

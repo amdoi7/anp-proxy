@@ -78,7 +78,7 @@ def setup_logging(config: LogConfig) -> None:
             filename=config.file,
             maxBytes=max_bytes,
             backupCount=config.backup_count,
-            encoding="utf-8"
+            encoding="utf-8",
         )
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
@@ -100,7 +100,7 @@ def setup_logging(config: LogConfig) -> None:
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
             structlog.processors.UnicodeDecoder(),
-            structlog.processors.JSONRenderer()
+            structlog.processors.JSONRenderer(),
         ],
         context_class=dict,
         logger_factory=structlog.stdlib.LoggerFactory(),

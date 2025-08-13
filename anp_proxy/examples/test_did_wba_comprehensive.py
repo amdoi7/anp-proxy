@@ -43,7 +43,9 @@ class DidWbaComprehensiveTest:
         if not DID_DOC_PATH.exists():
             raise FileNotFoundError(f"DID document not found: {DID_DOC_PATH}")
         if not DID_PRIVATE_KEY_PATH.exists():
-            raise FileNotFoundError(f"DID private key not found: {DID_PRIVATE_KEY_PATH}")
+            raise FileNotFoundError(
+                f"DID private key not found: {DID_PRIVATE_KEY_PATH}"
+            )
 
         # Gateway configuration with DID-WBA enabled
         gateway_config = GatewayConfig(
@@ -97,14 +99,18 @@ class DidWbaComprehensiveTest:
         authenticated = False
         for _ in range(8):
             await asyncio.sleep(0.5)
-            stats = self.gateway.websocket_manager.get_connection_stats()
+            stats = await self.gateway.websocket_manager.get_connection_stats()
             if stats.get("authenticated_connections", 0) > 0:
                 authenticated = True
                 break
-        print(f"📊 Connection stats: {self.gateway.websocket_manager.get_connection_stats()}")
+        print(
+            f"📊 Connection stats: {await self.gateway.websocket_manager.get_connection_stats()}"
+        )
 
         if not authenticated:
-            raise RuntimeError("DID-WBA handshake failed - no authenticated connections")
+            raise RuntimeError(
+                "DID-WBA handshake failed - no authenticated connections"
+            )
 
         print("✅ DID-WBA handshake successful!")
         return gateway_task, receiver_task
@@ -124,7 +130,11 @@ class DidWbaComprehensiveTest:
 
         results = []
 
-        async with httpx.AsyncClient(timeout=10.0, proxy=None, trust_env=False) as client:
+        async with httpx.AsyncClient(
+            timeout=10.0,
+            proxy=None,
+            trust_env=False,
+        ) as client:
             for method_path, description in test_cases:
                 try:
                     method, path = method_path.split(" ", 1)
@@ -168,7 +178,7 @@ class DidWbaComprehensiveTest:
             await asyncio.sleep(1)
 
             # Check if it really connected
-            stats = self.gateway.websocket_manager.get_connection_stats()
+            stats = await self.gateway.websocket_manager.get_connection_stats()
             if stats.get("total_connections", 0) > 1:
                 print("❌ Unauthorized connection was accepted (should be rejected)")
                 return False
@@ -223,7 +233,9 @@ class DidWbaComprehensiveTest:
             print("📊 Test Results:")
             print("   DID-WBA Handshake: ✅ PASS")
             print(f"   HTTP Requests: {'✅ PASS' if http_success else '❌ FAIL'}")
-            print(f"   Unauthorized Rejection: {'✅ PASS' if unauth_success else '❌ FAIL'}")
+            print(
+                f"   Unauthorized Rejection: {'✅ PASS' if unauth_success else '❌ FAIL'}"
+            )
 
             overall_success = http_success and unauth_success
             print(f"\n🎯 Overall Result: {'✅ PASS' if overall_success else '❌ FAIL'}")

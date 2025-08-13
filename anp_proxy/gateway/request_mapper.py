@@ -49,7 +49,7 @@ class RequestMapper:
                 request_id=request_id,
                 method=method,
                 path=path,
-                body_size=len(body) if body else 0
+                body_size=len(body) if body else 0,
             )
 
             # Encode to ANPX messages
@@ -59,14 +59,14 @@ class RequestMapper:
                 headers=headers,
                 query=query,
                 body=body,
-                request_id=request_id
+                request_id=request_id,
             )
 
             logger.debug(
                 "HTTP request mapped to ANPX",
                 request_id=request_id,
                 message_count=len(messages),
-                is_chunked=len(messages) > 1
+                is_chunked=len(messages) > 1,
             )
 
             return request_id, messages
@@ -93,7 +93,7 @@ class RequestMapper:
         # Add client information if available
         if request.client:
             headers["x-forwarded-for"] = request.client.host
-            if hasattr(request.client, 'port'):
+            if hasattr(request.client, "port"):
                 headers["x-forwarded-port"] = str(request.client.port)
 
         return headers
@@ -132,7 +132,7 @@ class RequestMapper:
         request_id: str,
         status: int,
         message: str,
-        headers: dict[str, str] | None = None
+        headers: dict[str, str] | None = None,
     ) -> list[ANPXMessage]:
         """
         Create an error response message.
@@ -150,21 +150,18 @@ class RequestMapper:
             response_headers = headers or {}
             response_headers["content-type"] = "application/json"
 
-            error_body = {
-                "error": message,
-                "status": status,
-                "request_id": request_id
-            }
+            error_body = {"error": message, "status": status, "request_id": request_id}
 
             import json
-            body_bytes = json.dumps(error_body).encode('utf-8')
+
+            body_bytes = json.dumps(error_body).encode("utf-8")
 
             messages = self.encoder.encode_http_response(
                 status=status,
                 reason=self._get_status_reason(status),
                 headers=response_headers,
                 body=body_bytes,
-                request_id=request_id
+                request_id=request_id,
             )
 
             return messages
@@ -172,7 +169,9 @@ class RequestMapper:
         except Exception as e:
             logger.error("Failed to create error response", error=str(e))
             # Return basic error message
-            basic_message = self.encoder.encode_error(f"Internal error: {e}", request_id)
+            basic_message = self.encoder.encode_error(
+                f"Internal error: {e}", request_id
+            )
             return [basic_message]
 
     def _get_status_reason(self, status: int) -> str:
@@ -193,7 +192,7 @@ class RequestMapper:
             500: "Internal Server Error",
             502: "Bad Gateway",
             503: "Service Unavailable",
-            504: "Gateway Timeout"
+            504: "Gateway Timeout",
         }
 
         return status_reasons.get(status, "Unknown")

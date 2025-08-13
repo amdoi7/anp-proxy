@@ -14,10 +14,7 @@ async def example_gateway_only():
     print("Running Gateway only example...")
 
     config = GatewayConfig(
-        host="127.0.0.1",
-        port=8080,
-        wss_host="127.0.0.1",
-        wss_port=8765
+        host="127.0.0.1", port=8080, wss_host="127.0.0.1", wss_port=8765
     )
 
     gateway = GatewayServer(config)
@@ -41,7 +38,7 @@ async def example_receiver_only():
 
     config = ReceiverConfig(
         gateway_url="ws://127.0.0.1:8765",
-        local_app_module=None  # Will use provided app
+        local_app_module=None,  # Will use provided app
     )
 
     receiver = ReceiverClient(config, fastapi_app)
@@ -77,10 +74,7 @@ async def example_both_modes():
         # Start both components
         print("Starting Gateway and Receiver...")
 
-        await asyncio.gather(
-            gateway.start(),
-            receiver.start()
-        )
+        await asyncio.gather(gateway.start(), receiver.start())
 
         print("Both components started!")
         print("Test with: curl http://127.0.0.1:8080/")
@@ -90,11 +84,7 @@ async def example_both_modes():
 
     finally:
         print("Stopping components...")
-        await asyncio.gather(
-            gateway.stop(),
-            receiver.stop(),
-            return_exceptions=True
-        )
+        await asyncio.gather(gateway.stop(), receiver.stop(), return_exceptions=True)
         print("All components stopped")
 
 
@@ -134,6 +124,7 @@ level = "INFO"
 
         # Create and run proxy
         from .. import ANPProxy
+
         proxy = ANPProxy(config)
 
         # For this example, just run gateway
@@ -163,7 +154,7 @@ def main():
         ("Gateway Only", example_gateway_only),
         ("Receiver Only", example_receiver_only),
         ("Both Modes", example_both_modes),
-        ("Config File", example_with_config_file)
+        ("Config File", example_with_config_file),
     ]
 
     for name, example_func in examples:

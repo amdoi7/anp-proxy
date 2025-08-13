@@ -34,7 +34,9 @@ class PendingRequest:
     def _timeout_callback(self) -> None:
         """Handle request timeout."""
         if not self.future.done():
-            self.future.set_exception(TimeoutError(f"Request {self.request_id} timed out"))
+            self.future.set_exception(
+                TimeoutError(f"Request {self.request_id} timed out")
+            )
 
     def complete(self, response: Response) -> None:
         """Complete the request with a response."""
@@ -73,9 +75,7 @@ class ResponseHandler:
         logger.info("Response handler initialized", timeout=timeout)
 
     async def create_pending_request(
-        self,
-        request_id: str,
-        timeout: float | None = None
+        self, request_id: str, timeout: float | None = None
     ) -> PendingRequest:
         """
         Create a new pending request.
@@ -108,7 +108,9 @@ class ResponseHandler:
         """
         pending_request = self.pending_requests.pop(request_id, None)
         if not pending_request:
-            logger.warning("Received response for unknown request", request_id=request_id)
+            logger.warning(
+                "Received response for unknown request", request_id=request_id
+            )
             return
 
         try:
@@ -118,11 +120,13 @@ class ResponseHandler:
             logger.debug(
                 "Response handled successfully",
                 request_id=request_id,
-                status=response.status_code
+                status=response.status_code,
             )
 
         except Exception as e:
-            logger.error("Failed to handle response", request_id=request_id, error=str(e))
+            logger.error(
+                "Failed to handle response", request_id=request_id, error=str(e)
+            )
             pending_request.error(e)
 
     async def handle_error(self, request_id: str, message: ANPXMessage) -> None:
@@ -141,13 +145,13 @@ class ResponseHandler:
         try:
             # Extract error message from body
             error_body = message.get_http_body()
-            error_text = error_body.decode('utf-8') if error_body else "Unknown error"
+            error_text = error_body.decode("utf-8") if error_body else "Unknown error"
 
             # Create error response
             response = Response(
                 content=error_text,
                 status_code=500,
-                headers={"content-type": "text/plain"}
+                headers={"content-type": "text/plain"},
             )
 
             pending_request.complete(response)
@@ -174,7 +178,7 @@ class ResponseHandler:
         response = Response(
             content=f"Gateway Error: {error_message}",
             status_code=504,
-            headers={"content-type": "text/plain"}
+            headers={"content-type": "text/plain"},
         )
 
         pending_request.complete(response)
@@ -200,9 +204,7 @@ class ResponseHandler:
 
         # Create response
         response = Response(
-            content=body,
-            status_code=resp_meta.status,
-            headers=resp_meta.headers
+            content=body, status_code=resp_meta.status, headers=resp_meta.headers
         )
 
         return response
@@ -218,6 +220,7 @@ class ResponseHandler:
             Number of requests cleaned up
         """
         import time
+
         time.time()
         stale_requests = []
 
@@ -226,7 +229,10 @@ class ResponseHandler:
             if not pending_request.future.done():
                 # For a more accurate check, we'd need to track creation time
                 # For now, just clean up requests with cancelled timeout handles
-                if pending_request.timeout_handle and pending_request.timeout_handle.cancelled():
+                if (
+                    pending_request.timeout_handle
+                    and pending_request.timeout_handle.cancelled()
+                ):
                     stale_requests.append(request_id)
 
         # Clean up stale requests
@@ -244,5 +250,5 @@ class ResponseHandler:
         """Get response handler statistics."""
         return {
             "pending_requests": len(self.pending_requests),
-            "default_timeout": self.default_timeout
+            "default_timeout": self.default_timeout,
         }

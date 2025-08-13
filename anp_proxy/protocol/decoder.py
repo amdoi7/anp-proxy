@@ -1,6 +1,5 @@
 """ANPX Protocol Message Decoder."""
 
-
 from .chunking import ChunkAssembler
 from .crc import verify_crc32
 from .exceptions import ANPXDecodingError, ANPXValidationError
@@ -33,7 +32,7 @@ class ANPXDecoder:
                 raise ANPXDecodingError(f"Data too short for header: {len(data)} bytes")
 
             # Decode header
-            header = ANPXHeader.decode(data[:ANPXHeader.HEADER_SIZE])
+            header = ANPXHeader.decode(data[: ANPXHeader.HEADER_SIZE])
 
             # Validate total length
             if len(data) != header.total_length:
@@ -42,7 +41,7 @@ class ANPXDecoder:
                 )
 
             # Extract and validate body
-            body_data = data[ANPXHeader.HEADER_SIZE:]
+            body_data = data[ANPXHeader.HEADER_SIZE :]
             if not verify_crc32(body_data, header.body_crc):
                 raise ANPXValidationError("Body CRC validation failed")
 
@@ -78,7 +77,8 @@ class ANPXDecoder:
                     # Try to skip this field by reading tag and length
                     if offset + 5 <= len(body_data):
                         import struct
-                        _, length = struct.unpack("!BI", body_data[offset:offset + 5])
+
+                        _, length = struct.unpack("!BI", body_data[offset : offset + 5])
                         offset += 5 + length
                         continue
                 raise ANPXDecodingError(f"Failed to decode TLV field: {e}") from e
@@ -111,7 +111,10 @@ class ANPXDecoder:
         Returns:
             Dict mapping request_id to number of chunks received
         """
-        return {req_id: len(chunks) for req_id, chunks in self.chunk_assembler.chunks.items()}
+        return {
+            req_id: len(chunks)
+            for req_id, chunks in self.chunk_assembler.chunks.items()
+        }
 
     def cleanup_stale_chunks(self, max_age_seconds: float = 300.0) -> int:
         """

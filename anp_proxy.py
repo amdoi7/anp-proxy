@@ -57,10 +57,7 @@ class ANPProxy:
 
         # Start both components concurrently
         try:
-            await asyncio.gather(
-                self.gateway_server.run(),
-                self.receiver_client.run()
-            )
+            await asyncio.gather(self.gateway_server.run(), self.receiver_client.run())
         except Exception as e:
             logger.error("Error running dual mode", error=str(e))
             raise
@@ -82,50 +79,26 @@ class ANPProxy:
     "--config",
     "-c",
     type=click.Path(exists=True, path_type=Path),
-    help="Configuration file path"
+    help="Configuration file path",
 )
 @click.option(
     "--mode",
     "-m",
     type=click.Choice(["gateway", "receiver", "both"]),
-    help="Operating mode"
+    help="Operating mode",
 )
-@click.option(
-    "--gateway-host",
-    help="Gateway HTTP host"
-)
-@click.option(
-    "--gateway-port",
-    type=int,
-    help="Gateway HTTP port"
-)
-@click.option(
-    "--wss-host",
-    help="WebSocket server host"
-)
-@click.option(
-    "--wss-port",
-    type=int,
-    help="WebSocket server port"
-)
-@click.option(
-    "--gateway-url",
-    help="Gateway WebSocket URL for receiver"
-)
-@click.option(
-    "--local-app",
-    help="Local ASGI app module (e.g., 'myapp:app')"
-)
+@click.option("--gateway-host", help="Gateway HTTP host")
+@click.option("--gateway-port", type=int, help="Gateway HTTP port")
+@click.option("--wss-host", help="WebSocket server host")
+@click.option("--wss-port", type=int, help="WebSocket server port")
+@click.option("--gateway-url", help="Gateway WebSocket URL for receiver")
+@click.option("--local-app", help="Local ASGI app module (e.g., 'myapp:app')")
 @click.option(
     "--log-level",
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
-    help="Log level"
+    help="Log level",
 )
-@click.option(
-    "--debug",
-    is_flag=True,
-    help="Enable debug mode"
-)
+@click.option("--debug", is_flag=True, help="Enable debug mode")
 def main(
     config: Path | None = None,
     mode: str | None = None,
@@ -136,7 +109,7 @@ def main(
     gateway_url: str | None = None,
     local_app: str | None = None,
     log_level: str | None = None,
-    debug: bool = False
+    debug: bool = False,
 ) -> None:
     """
     ANP Proxy - HTTP over WebSocket tunneling for private networks.
@@ -201,6 +174,7 @@ def main(
             try:
                 # Use uvloop on Unix-like systems for better performance
                 import uvloop
+
                 uvloop.install()
             except ImportError:
                 pass

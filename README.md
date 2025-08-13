@@ -156,7 +156,7 @@ config.receiver.local_app_module = "myapp:app"
 # 创建并运行代理
 async def main():
     proxy = ANPProxy(config)
-    
+
     if config.mode == "gateway":
         gateway = proxy.create_gateway_server()
         await gateway.run()
