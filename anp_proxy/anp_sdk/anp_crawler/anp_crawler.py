@@ -6,7 +6,7 @@ It manages crawling sessions, caches results, and coordinates different componen
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 from .anp_client import ANPClient
@@ -47,7 +47,7 @@ class ANPCrawler:
         # Session state
         self._visited_urls: set = set()
         self._cache: dict[str, Any] = {}
-        self._agent_description_uri: Optional[str] = (
+        self._agent_description_uri: str | None = (
             None  # Track first URL as agent description URI
         )
 
@@ -282,7 +282,7 @@ class ANPCrawler:
         """
         pass
 
-    def _cache_get(self, url: str) -> Optional[tuple[dict, list]]:
+    def _cache_get(self, url: str) -> tuple[dict, list] | None:
         """Get cached result for a URL."""
         if not self.cache_enabled:
             return None
@@ -360,7 +360,7 @@ class ANPCrawler:
 
         return await anp_interface.execute(arguments)
 
-    def get_tool_interface_info(self, tool_name: str) -> Optional[dict[str, Any]]:
+    def get_tool_interface_info(self, tool_name: str) -> dict[str, Any] | None:
         """
         Get stored interface metadata for a tool.
 

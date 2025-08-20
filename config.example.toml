@@ -1,7 +1,7 @@
 # ANP Proxy Configuration Example
 
-# Operating mode: "gateway", "receiver", or "both"
-mode = "both"
+# Operating mode: "gateway" only
+mode = "gateway"
 
 # Enable debug mode
 debug = false
@@ -15,12 +15,12 @@ format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 [gateway]
 # HTTP server settings
-host = "0.0.0.0"
-port = 8080
+host = "127.0.0.1"
+port = 9877
 
 # WebSocket server settings
-wss_host = "0.0.0.0"
-wss_port = 8765
+wss_host = "127.0.0.1"
+wss_port = 9878
 
 # Connection limits
 max_connections = 100
@@ -28,7 +28,7 @@ timeout = 30.0
 keepalive_timeout = 60.0
 
 # Protocol settings
-chunk_size = 65536  # 64KB
+chunk_size = 65536   # 64KB
 ping_interval = 10.0
 
 [gateway.tls]
@@ -36,55 +36,27 @@ enabled = false
 # cert_file = "server.crt"
 # key_file = "server.key"
 # ca_file = "ca.crt"
-verify_mode = "required"  # none, optional, required
+verify_mode = "required" # none, optional, required
 
 [gateway.auth]
 enabled = true
 # shared_secret = "your-secret-key-here"
-token_expiry = 3600  # 1 hour
+token_expiry = 3600 # 1 hour
 max_attempts = 3
 # DID-WBA settings
 did_wba_enabled = false
-# did = "did:key:z6Mk..."
-# allowed_dids = ["did:key:z6Mk..."]
+# did_document_path = "docs/did_info/your-did-doc.json"
+# private_key_path = "docs/did_info/your-private-key.pem"
+# allowed_dids = ["did:wba:example.com:your-did"]
 
-[receiver]
-# Gateway connection
-gateway_url = "wss://localhost:8765"
-
-# Local application settings
-local_host = "127.0.0.1"
-local_port = 8000
-# local_app_module = "myapp:app"  # ASGI app module
-
-# Connection settings
-timeout = 30.0
-keepalive_interval = 60.0
-ping_interval = 10.0
-
-# Reconnection settings
-reconnect_enabled = true
-reconnect_delay = 5.0
-max_reconnect_attempts = 10
-
-# Protocol settings
-chunk_size = 65536  # 64KB
-
-[receiver.tls]
+[gateway.database]
 enabled = false
-# cert_file = "client.crt"
-# key_file = "client.key"
-# ca_file = "ca.crt"
-verify_mode = "required"
-
-[receiver.auth]
-enabled = true
-# shared_secret = "your-secret-key-here"
-token_expiry = 3600
-max_attempts = 3
-# DID-WBA settings (client needs doc and key to build header)
-did_wba_enabled = false
-# did = "did:key:z6Mk..."
-# did_document_path = "./did_info/did.json"
-# private_key_path = "./did_info/key-1_private.pem"
-# nonce_window_seconds = 300
+# host = "localhost"
+# port = 3306
+# user = "anp_user"
+# password = "your-secure-password"  # 🔒 SECURITY: Use environment variable ANP_DB_PASSWORD
+# database = "anp_db"
+# charset = "utf8mb4"
+# connect_timeout = 5.0
+# min_connections = 2
+# max_connections = 20

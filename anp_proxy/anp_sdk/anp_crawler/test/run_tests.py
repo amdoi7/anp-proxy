@@ -12,8 +12,9 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
-from octopus.utils.log_base import setup_enhanced_logging
 from test_anp_crawler import TestANPCrawler, TestANPDocumentParser, TestANPInterface
+
+from anp_proxy.common.log_base import setup_enhanced_logging
 
 
 def main():

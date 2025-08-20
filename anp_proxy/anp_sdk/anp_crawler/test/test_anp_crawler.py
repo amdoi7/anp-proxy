@@ -19,9 +19,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
-from octopus.anp_sdk.anp_crawler.anp_crawler import ANPCrawler
-from octopus.anp_sdk.anp_crawler.anp_interface import ANPInterface
-from octopus.anp_sdk.anp_crawler.anp_parser import ANPDocumentParser
+from anp_proxy.anp_sdk.anp_crawler.anp_crawler import ANPCrawler
+from anp_proxy.anp_sdk.anp_crawler.anp_interface import ANPInterface
+from anp_proxy.anp_sdk.anp_crawler.anp_parser import ANPDocumentParser
 
 
 class TestANPCrawler(unittest.IsolatedAsyncioTestCase):
@@ -58,7 +58,7 @@ class TestANPCrawler(unittest.IsolatedAsyncioTestCase):
         self.test_video_url = "https://grand-hotel.com/media/hotel-tour-video.mp4"
         self.test_audio_url = "https://grand-hotel.com/media/hotel-audio.mp3"
 
-    @patch("octopus.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
+    @patch("anp_proxy.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
     def test_anp_crawler_initialization(self, mock_auth_header):
         """Test ANPCrawler initialization."""
         mock_auth_header.return_value = MagicMock()
@@ -77,7 +77,7 @@ class TestANPCrawler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(crawler._visited_urls), 0)
         self.assertEqual(len(crawler._cache), 0)
 
-    @patch("octopus.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
+    @patch("anp_proxy.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
     async def test_fetch_text_agent_description(self, mock_auth_header):
         """Test fetching Agent Description document."""
         mock_auth_header.return_value = MagicMock()
@@ -114,7 +114,7 @@ class TestANPCrawler(unittest.IsolatedAsyncioTestCase):
         # Agent Description should extract interface URLs but not actual tools yet
         # (would need to fetch the interface files)
 
-    @patch("octopus.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
+    @patch("anp_proxy.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
     async def test_fetch_text_openrpc_document(self, mock_auth_header):
         """Test fetching and parsing OpenRPC document."""
         mock_auth_header.return_value = MagicMock()
@@ -155,7 +155,7 @@ class TestANPCrawler(unittest.IsolatedAsyncioTestCase):
             self.assertIn("description", interface["function"])
             self.assertIn("parameters", interface["function"])
 
-    @patch("octopus.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
+    @patch("anp_proxy.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
     async def test_fetch_text_with_ref_resolution(self, mock_auth_header):
         """Test OpenRPC $ref resolution in schemas."""
         mock_auth_header.return_value = MagicMock()
@@ -206,7 +206,7 @@ class TestANPCrawler(unittest.IsolatedAsyncioTestCase):
         # At least one $ref should have been resolved
         self.assertTrue(found_ref_resolution, "$ref references should be resolved")
 
-    @patch("octopus.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
+    @patch("anp_proxy.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
     async def test_fetch_text_embedded_openrpc(self, mock_auth_header):
         """Test fetching Agent Description with embedded OpenRPC content."""
         mock_auth_header.return_value = MagicMock()
@@ -276,7 +276,7 @@ class TestANPCrawler(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("firstName", guest_info["properties"])
                 self.assertIn("email", guest_info["properties"])
 
-    @patch("octopus.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
+    @patch("anp_proxy.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
     async def test_fetch_text_error_handling(self, mock_auth_header):
         """Test error handling in fetch_text."""
         mock_auth_header.return_value = MagicMock()
@@ -304,7 +304,7 @@ class TestANPCrawler(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Error:", content_json["content"])
         self.assertEqual(len(interfaces_list), 0)
 
-    @patch("octopus.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
+    @patch("anp_proxy.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
     async def test_fetch_image(self, mock_auth_header):
         """Test fetch_image method (pass implementation)."""
         mock_auth_header.return_value = MagicMock()
@@ -321,7 +321,7 @@ class TestANPCrawler(unittest.IsolatedAsyncioTestCase):
         # Should return None for pass implementation
         self.assertIsNone(result)
 
-    @patch("octopus.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
+    @patch("anp_proxy.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
     async def test_fetch_video(self, mock_auth_header):
         """Test fetch_video method (pass implementation)."""
         mock_auth_header.return_value = MagicMock()
@@ -338,7 +338,7 @@ class TestANPCrawler(unittest.IsolatedAsyncioTestCase):
         # Should return None for pass implementation
         self.assertIsNone(result)
 
-    @patch("octopus.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
+    @patch("anp_proxy.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
     async def test_fetch_audio(self, mock_auth_header):
         """Test fetch_audio method (pass implementation)."""
         mock_auth_header.return_value = MagicMock()
@@ -355,7 +355,7 @@ class TestANPCrawler(unittest.IsolatedAsyncioTestCase):
         # Should return None for pass implementation
         self.assertIsNone(result)
 
-    @patch("octopus.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
+    @patch("anp_proxy.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
     async def test_fetch_auto(self, mock_auth_header):
         """Test fetch_auto method (pass implementation)."""
         mock_auth_header.return_value = MagicMock()
@@ -372,7 +372,7 @@ class TestANPCrawler(unittest.IsolatedAsyncioTestCase):
         # Should return None for pass implementation
         self.assertIsNone(result)
 
-    @patch("octopus.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
+    @patch("anp_proxy.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
     async def test_caching_functionality(self, mock_auth_header):
         """Test URL caching functionality."""
         mock_auth_header.return_value = MagicMock()
@@ -411,7 +411,7 @@ class TestANPCrawler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(crawler.get_cache_size(), 0)
         self.assertEqual(len(crawler.get_visited_urls()), 0)
 
-    @patch("octopus.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
+    @patch("anp_proxy.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader")
     def test_session_management(self, mock_auth_header):
         """Test session management functionality."""
         mock_auth_header.return_value = MagicMock()
@@ -437,7 +437,7 @@ class TestANPCrawler(unittest.IsolatedAsyncioTestCase):
     def test_url_parameter_removal(self):
         """Test URL parameter removal functionality."""
         # Test with mock since we need to access private method
-        with patch("octopus.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader"):
+        with patch("anp_proxy.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader"):
             crawler = ANPCrawler(
                 did_document_path=self.mock_did_document_path,
                 private_key_path=self.mock_private_key_path,

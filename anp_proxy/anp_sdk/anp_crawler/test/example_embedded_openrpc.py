@@ -14,9 +14,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
-from octopus.anp_sdk.anp_crawler.anp_crawler import ANPCrawler
-from octopus.anp_sdk.anp_crawler.anp_interface import ANPInterface
-from octopus.anp_sdk.anp_crawler.anp_parser import ANPDocumentParser
+from anp_proxy.anp_sdk.anp_crawler.anp_crawler import ANPCrawler
+from anp_proxy.anp_sdk.anp_crawler.anp_interface import ANPInterface
+from anp_proxy.anp_sdk.anp_crawler.anp_parser import ANPDocumentParser
 
 
 def print_separator(title: str):
@@ -122,7 +122,9 @@ async def demo_embedded_openrpc():
     print_subsection("4. 使用 ANPCrawler 完整流程演示")
 
     # Create mock crawler
-    with patch("octopus.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader") as mock_auth:
+    with patch(
+        "anp_proxy.anp_sdk.anp_crawler.anp_client.DIDWbaAuthHeader"
+    ) as mock_auth:
         mock_auth.return_value = MagicMock()
 
         crawler = ANPCrawler(

@@ -72,11 +72,6 @@ class DidWbaVerifierAdapter:
             )
         )
 
-        # Store DID-specific configurations
-        self._did_configs = {}
-        if hasattr(config, "did_configs"):
-            self._did_configs = config.did_configs
-
     async def verify(self, headers_like: Any, domain: str) -> DidAuthResult:
         if not self.config.enabled:
             return DidAuthResult(success=False, error="DID-WBA disabled")

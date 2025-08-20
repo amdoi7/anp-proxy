@@ -84,7 +84,7 @@ python -m unittest test_anp_crawler -v
 ## 依赖要求
 
 测试需要以下模块正常工作：
-- `octopus.utils.log_base` - 日志系统
+- `anp_proxy.common.log_base` - 日志系统
 - `agent_connect.authentication` - DID 认证（测试中会被 mock）
 - `aiohttp` - HTTP 客户端
 - `unittest.mock` - 测试 mock 功能

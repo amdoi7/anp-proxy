@@ -85,8 +85,8 @@ agent_connect  # 提供 DID-WBA 的头部构造与验签、DID 文档解析等
 ```python
 # app.py
 from fastapi import FastAPI
-from octopus.utils.log_base import setup_enhanced_logging
-from octopus.anp_sdk.anp_auth.auth_middleware import auth_middleware
+from anp_proxy.common.log_base import setup_enhanced_logging
+from anp_proxy.anp_sdk.anp_auth.auth_middleware import auth_middleware
 
 
 def create_app() -> FastAPI:
@@ -131,7 +131,7 @@ app = create_app()
 import asyncio
 import aiohttp
 from agent_connect.authentication import DIDWbaAuthHeader
-from octopus.utils.log_base import setup_enhanced_logging
+from anp_proxy.common.log_base import setup_enhanced_logging
 
 
 async def main():
@@ -177,8 +177,8 @@ if __name__ == "__main__":
 ```python
 # client_anp.py
 import asyncio
-from octopus.utils.log_base import setup_enhanced_logging
-from octopus.anp_sdk.anp_crawler.anp_client import ANPClient
+from anp_proxy.common.log_base import setup_enhanced_logging
+from anp_proxy.anp_sdk.anp_crawler.anp_client import ANPClient
 
 
 async def main():
@@ -206,8 +206,8 @@ if __name__ == "__main__":
 ```python
 # did_bootstrap.py
 import asyncio
-from octopus.utils.log_base import setup_enhanced_logging
-from octopus.anp_sdk.anp_auth.did_auth import generate_or_load_did
+from anp_proxy.common.log_base import setup_enhanced_logging
+from anp_proxy.anp_sdk.anp_auth.did_auth import generate_or_load_did
 
 
 async def main():
@@ -258,8 +258,8 @@ if __name__ == "__main__":
 ```python
 # server_minimal.py
 from fastapi import FastAPI
-from octopus.utils.log_base import setup_enhanced_logging
-from octopus.anp_sdk.anp_auth.auth_middleware import auth_middleware
+from anp_proxy.common.log_base import setup_enhanced_logging
+from anp_proxy.anp_sdk.anp_auth.auth_middleware import auth_middleware
 
 
 app = FastAPI()
@@ -328,15 +328,15 @@ if __name__ == "__main__":
     - `get_auth_header(url: str) -> dict`
     - `update_token(url: str, headers: dict) -> Optional[str]`
     - `clear_token(url: str) -> None`
-  - `octopus.anp_sdk.anp_crawler.anp_client.ANPClient.fetch_url(...)`
+  - `anp_proxy.anp_sdk.anp_crawler.anp_client.ANPClient.fetch_url(...)`
 
 - 验证端
-  - `octopus.anp_sdk.anp_auth.auth_middleware.auth_middleware`
-  - `octopus.anp_sdk.anp_auth.did_auth.handle_did_auth(authorization: str, domain: str)`
-  - `octopus.anp_sdk.anp_auth.did_auth.get_and_validate_domain(request)`
-  - `octopus.anp_sdk.anp_auth.token_auth.handle_bearer_auth(token: str)`
-  - `octopus.anp_sdk.anp_auth.token_auth.create_access_token(data: dict, expires_delta: Optional[timedelta] = None)`
-  - `octopus.anp_sdk.anp_auth.jwt_keys.get_jwt_private_key(path)` / `get_jwt_public_key(path)`
+  - `anp_proxy.anp_sdk.anp_auth.auth_middleware.auth_middleware`
+  - `anp_proxy.anp_sdk.anp_auth.did_auth.handle_did_auth(authorization: str, domain: str)`
+  - `anp_proxy.anp_sdk.anp_auth.did_auth.get_and_validate_domain(request)`
+  - `anp_proxy.anp_sdk.anp_auth.token_auth.handle_bearer_auth(token: str)`
+  - `anp_proxy.anp_sdk.anp_auth.token_auth.create_access_token(data: dict, expires_delta: Optional[timedelta] = None)`
+  - `anp_proxy.anp_sdk.anp_auth.jwt_keys.get_jwt_private_key(path)` / `get_jwt_public_key(path)`
 
 
 以上内容可作为其他工程接入 ANP DID-WBA 认证的模板。直接拷贝“服务端中间件 + 客户端最小示例”即可快速运行；如需更强的自动化（401 回退等），推荐使用 `ANPClient` 封装。

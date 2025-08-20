@@ -1,637 +1,792 @@
-"""Gateway HTTP server implementation."""
+"""
+核心网关协调器 - 单一职责：协调所有子模块，提供统一的网关接口
+- 整合连接管理、路由、消息处理、服务注册
+- 提供统一的 API 接口
+- 协调各模块间的交互
+"""
 
 import asyncio
-import logging
+import json
 from contextlib import asynccontextmanager
 from typing import Any
 
-import uvicorn
-from fastapi import FastAPI, Request
-from fastapi.responses import Response
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from starlette.responses import Response
 
-from ..common.config import GatewayConfig
-from ..common.log_base import get_logger
-from ..common.utils import GracefulShutdown
-from .middleware import (
-    CORSMiddleware,
-    LoggingMiddleware,
-    RateLimitMiddleware,
-    SecurityHeadersMiddleware,
-)
-from .request_mapper import RequestMapper
-from .response_handler import ResponseHandler
-from .smart_router import SmartRouter
-from .websocket_manager import WebSocketManager
+try:
+    from ..common.did_resolver import get_did_service_resolver
+    from ..common.did_wba import DidAuthResult, DidWbaVerifier
+    from ..common.log_base import get_logger
+    from .connection import ConnectInfo, ConnectionManager
+    from .message import MessageHandler
+    from .registry import ServiceRegistryManager
+    from .routing import RequestRouter
+except ImportError:
+    from anp_proxy.common.did_resolver import get_did_service_resolver
+    from anp_proxy.common.did_wba import DidAuthResult, DidWbaVerifier
+    from anp_proxy.common.log_base import get_logger
+    from anp_proxy.gateway.connection import ConnectInfo, ConnectionManager
+    from anp_proxy.gateway.message import MessageHandler
+    from anp_proxy.gateway.registry import ServiceRegistryManager
+    from anp_proxy.gateway.routing import RequestRouter
 
 logger = get_logger(__name__)
 
 
-class MessageBatcher:
+class ANPGateway:
     """
-    Message batcher for optimizing WebSocket message sending with batching.
-    Reduces system calls by combining multiple messages into batches.
+    ANP 网关核心 - 世界级 AI Agent 基础设施网关
+
+    单一职责原则下的模块协调：
+    - ConnectionManager: WebSocket 连接管理
+    - RequestRouter: HTTP 路径路由
+    - MessageHandler: 消息处理和转发
+    - ServiceRegistryManager: 服务注册和发现
     """
 
-    def __init__(self, max_batch_size: int = 10, batch_timeout: float = 0.01):
-        """
-        Initialize message batcher.
+    def __init__(
+        self,
+        ping_interval: float = 30.0,
+        connection_timeout: float = 300.0,
+        response_timeout: float = 30.0,
+        heartbeat_interval: float = 60.0,
+        auth_config=None,
+    ):
+        # 初始化各个管理器
+        self.connection_manager = ConnectionManager(ping_interval, connection_timeout)
+        self.request_router = RequestRouter()
+        self.message_handler = MessageHandler(response_timeout)
+        self.registry_manager = ServiceRegistryManager(heartbeat_interval)
 
-        Args:
-            max_batch_size: Maximum messages per batch
-            batch_timeout: Maximum time to wait before sending partial batch (seconds)
-        """
-        self.max_batch_size = max_batch_size
-        self.batch_timeout = batch_timeout
-        self.pending_batches: dict[str, list] = {}  # connection_id -> [messages]
-        self.batch_timers: dict[str, asyncio.Handle] = {}  # connection_id -> timer
+        # 初始化 DID WBA 验证器
+        from ..common.config import AuthConfig
 
-    async def add_message(self, connection_id: str, message, send_callback):
-        """
-        Add message to batch for a connection.
+        self.auth_config = auth_config or AuthConfig()
+        self.did_wba_verifier = DidWbaVerifier(self.auth_config)
 
-        Args:
-            connection_id: Target connection ID
-            message: Message to send
-            send_callback: Function to call when sending batch
-        """
-        if connection_id not in self.pending_batches:
-            self.pending_batches[connection_id] = []
+        # 网关状态
+        self._running = False
 
-        batch = self.pending_batches[connection_id]
-        batch.append((message, send_callback))
+        # 路由清理任务
+        self._route_cleanup_task: asyncio.Task | None = None
+        self._route_cleanup_interval = 60.0  # 60秒清理一次
 
-        # Cancel existing timer
-        if connection_id in self.batch_timers:
-            self.batch_timers[connection_id].cancel()
-
-        # Send immediately if batch is full
-        if len(batch) >= self.max_batch_size:
-            await self._send_batch(connection_id)
-        else:
-            # Set timer for partial batch
-            loop = asyncio.get_event_loop()
-            timer = loop.call_later(
-                self.batch_timeout,
-                lambda: asyncio.create_task(self._send_batch(connection_id)),
-            )
-            self.batch_timers[connection_id] = timer
-
-    async def _send_batch(self, connection_id: str):
-        """
-        Send all pending messages for a connection.
-        """
-        if connection_id not in self.pending_batches:
-            return
-
-        batch = self.pending_batches.pop(connection_id, [])
-        if connection_id in self.batch_timers:
-            self.batch_timers[connection_id].cancel()
-            del self.batch_timers[connection_id]
-
-        if not batch:
-            return
-
-        # Send all messages in batch
-        for message, send_callback in batch:
-            try:
-                await send_callback(message)
-            except Exception as e:
-                logger.error(
-                    "Failed to send message in batch",
-                    connection_id=connection_id,
-                    error=str(e),
-                )
-
-    async def flush_all_batches(self):
-        """
-        Send all pending batches immediately.
-        """
-        connection_ids = list(self.pending_batches.keys())
-        for connection_id in connection_ids:
-            await self._send_batch(connection_id)
-
-    def get_batch_stats(self) -> dict:
-        """
-        Get batching statistics.
-        """
-        total_pending = sum(len(batch) for batch in self.pending_batches.values())
-        return {
-            "pending_batches": len(self.pending_batches),
-            "total_pending_messages": total_pending,
-            "active_timers": len(self.batch_timers),
-        }
-
-
-class GatewayServer:
-    """HTTP Gateway server that forwards requests to receivers via WebSocket."""
-
-    def __init__(self, config: GatewayConfig) -> None:
-        """
-        Initialize Gateway server.
-
-        Args:
-            config: Gateway configuration
-        """
-        self.config = config
-
-        # Initialize components
-        self.websocket_manager = WebSocketManager(config)
-        self.request_mapper = RequestMapper(config.chunk_size)
-        self.response_handler = ResponseHandler(config.timeout)
-
-        # Smart Router
-        self.smart_router: SmartRouter | None = None
-
-        # Create FastAPI app
-        self.app = self._create_app()
-
-        # Message batching for performance optimization
-        self.message_batcher = MessageBatcher(
-            max_batch_size=getattr(config, "message_batch_size", 10),
-            batch_timeout=getattr(config, "batch_timeout", 0.01),
-        )
-
-        # Setup callbacks
-        self.websocket_manager.set_response_callback(self._handle_websocket_response)
-        self.websocket_manager.set_error_callback(self._handle_websocket_error)
-
-        self._server_task: asyncio.Task | None = None
+        # 初始化恶意请求检测
+        self._init_malicious_patterns()
 
         logger.info(
-            "Gateway server initialized", smart_routing=config.enable_smart_routing
-        )
-
-        # Suppress uvicorn error logs for CancelledError
-        uvicorn_error_logger = logging.getLogger("uvicorn.error")
-        uvicorn_error_logger.addFilter(self._filter_cancelled_errors)
-
-    def _filter_cancelled_errors(self, record: logging.LogRecord) -> bool:
-        """Filter out CancelledError tracebacks from uvicorn logs."""
-        if record.exc_info and record.exc_info[0] is not None:
-            exc_type = record.exc_info[0]
-            if exc_type is asyncio.CancelledError:
-                return False
-            # Also filter out records containing "CancelledError"
-            if "CancelledError" in str(record.exc_info[1]):
-                return False
-        # Filter out messages containing CancelledError text
-        if hasattr(record, "getMessage"):
-            message = record.getMessage()
-            if "CancelledError" in message or "generator didn't stop" in message:
-                return False
-        return True
-
-    @asynccontextmanager
-    async def _lifespan(self, app: FastAPI):
-        """Application lifespan manager."""
-        startup_success = False
-        try:
-            # Startup
-            await self._startup()
-            startup_success = True
-            yield
-        except asyncio.CancelledError:
-            logger.debug("Application lifespan cancelled")
-            if startup_success:
-                # If startup was successful, we need to clean shutdown
-                try:
-                    await self._shutdown()
-                except Exception as e:
-                    logger.error("Error during emergency shutdown", error=str(e))
-            raise  # Re-raise CancelledError to stop the generator properly
-        except Exception as e:
-            logger.error("Error during application startup", error=str(e))
-            # Don't yield if startup failed
-            raise
-        finally:
-            # Normal shutdown only if not cancelled
-            if startup_success:
-                try:
-                    await self._shutdown()
-                except asyncio.CancelledError:
-                    logger.debug("Application shutdown cancelled")
-                except Exception as e:
-                    logger.error("Error during shutdown", error=str(e))
-
-    def _create_app(self) -> FastAPI:
-        """Create and configure FastAPI application."""
-        app = FastAPI(
-            title="ANP Proxy Gateway",
-            description="HTTP Gateway for Agent Network Proxy",
-            version="1.0.0",
-            docs_url="/docs",
-            redoc_url="/redoc",
-            lifespan=self._lifespan,
-        )
-
-        # Add middleware (order matters - last added runs first)
-        app.add_middleware(SecurityHeadersMiddleware)
-        app.add_middleware(CORSMiddleware)
-        app.add_middleware(RateLimitMiddleware, max_requests=100, window_seconds=60)
-        app.add_middleware(LoggingMiddleware)
-
-        # Add routes
-        self._add_routes(app)
-
-        return app
-
-    def _add_routes(self, app: FastAPI) -> None:
-        """Add HTTP routes to the application."""
-
-        @app.get("/health")
-        async def health_check():
-            """Health check endpoint."""
-            stats = await self.get_stats()
-            return {"status": "healthy", "stats": stats}
-
-        @app.get("/stats")
-        async def get_statistics():
-            """Get server statistics."""
-            return await self.get_stats()
-
-        # Catch-all route for proxying
-        @app.api_route(
-            "/{path:path}",
-            methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
-            include_in_schema=False,
-        )
-        async def proxy_request(request: Request, path: str) -> Response:
-            """
-            Proxy HTTP request to receiver.
-
-            Args:
-                request: HTTP request to proxy
-                path: Request path
-
-            Returns:
-                HTTP response from receiver
-            """
-            return await self._handle_http_request(request)
-
-    async def _handle_http_request(self, request: Request) -> Response:
-        """
-        HTTP request handler with smart routing.
-
-        Args:
-            request: HTTP request to handle
-
-        Returns:
-            HTTP response
-        """
-        request_start_time = asyncio.get_event_loop().time()
-
-        try:
-            # Map HTTP request to ANPX message(s)
-            request_id, anpx_messages = await self.request_mapper.map_request(request)
-
-            # Create pending request for response tracking
-            pending_request = await self.response_handler.create_pending_request(
-                request_id, self.config.timeout
-            )
-
-            # Route request using smart router or fallback to basic routing
-            success, selected_connection = await self._route_and_send_request(
-                request, request_id, anpx_messages
-            )
-
-            if not success:
-                # No receiver available
-                error_messages = self.request_mapper.create_error_response_message(
-                    request_id, status=503, message="No receiver available"
-                )
-                return await self._convert_anpx_to_response(error_messages[0])
-
-            # Wait for response
-            try:
-                response = await pending_request.wait()
-
-                # Calculate response time
-                response_time = asyncio.get_event_loop().time() - request_start_time
-
-                logger.debug(
-                    "Request completed successfully",
-                    request_id=request_id,
-                    method=request.method,
-                    path=str(request.url.path),
-                    status=response.status_code,
-                    response_time=f"{response_time:.3f}s",
-                    connection=selected_connection,
-                )
-
-                return response
-
-            except TimeoutError:
-                logger.warning("Request timed out", request_id=request_id)
-                return Response(
-                    content="Request timeout",
-                    status_code=504,
-                    headers={"content-type": "text/plain"},
-                )
-
-        except Exception as e:
-            logger.error("Failed to handle HTTP request", error=str(e))
-            return Response(
-                content=f"Internal server error: {str(e)}",
-                status_code=500,
-                headers={"content-type": "text/plain"},
-            )
-
-    async def _route_and_send_request(
-        self, request: Request, request_id: str, anpx_messages: list
-    ) -> tuple[bool, str | None]:
-        """
-        Route request and send to selected connection.
-
-        Returns:
-            Tuple of (success, selected_connection_id)
-        """
-        selected_connection = None
-
-        # Try enterprise-grade universal smart routing first
-        if self.smart_router:
-            try:
-                # Use the new universal fallback routing strategy
-                selected_connection = (
-                    await self.smart_router.route_request_with_universal_fallback(
-                        request
-                    )
-                )
-
-                if selected_connection:
-                    # Send to specific connection using batching for efficiency
-                    success = True
-                    for message in anpx_messages:
-                        if not await self._send_to_specific_connection_batched(
-                            selected_connection, request_id, message
-                        ):
-                            success = False
-                            break
-
-                    if success:
-                        logger.debug(
-                            "Universal smart routing successful",
-                            request_id=request_id,
-                            connection=selected_connection,
-                            host=request.headers.get("host"),
-                            routing_type="universal",
-                        )
-                        return True, selected_connection
-
-            except Exception as e:
-                logger.error(
-                    "Universal smart routing failed, falling back to basic routing",
-                    error=str(e),
-                    host=request.headers.get("host"),
-                    path=str(request.url.path),
-                )
-
-        # No fallback routing - database-driven only
-        logger.warning(
-            "Smart routing failed and fallback routing is disabled",
-            request_id=request_id,
-            host=request.headers.get("host"),
-            path=str(request.url.path),
-        )
-        return False, selected_connection
-
-    async def _send_to_specific_connection_batched(
-        self, connection_id: str, request_id: str, message
-    ) -> bool:
-        """Send ANPX message to a specific connection using batching for optimization."""
-        conn_info = self.websocket_manager.connections.get(connection_id)
-
-        if not conn_info or not conn_info.authenticated:
-            logger.warning(
-                "Target connection not available",
-                connection_id=connection_id,
-                request_id=request_id,
-            )
-            return False
-
-        try:
-            # Define the actual send callback
-            async def send_callback(msg):
-                await self.websocket_manager._send_message(conn_info, msg)
-
-            # Add message to batch for this connection
-            await self.message_batcher.add_message(
-                connection_id, message, send_callback
-            )
-
-            # Track routing with timestamp for cleanup
-            self.websocket_manager.request_routing[request_id] = connection_id
-            self.websocket_manager.request_timestamps[request_id] = (
-                asyncio.get_event_loop().time()
-            )
-            conn_info.pending_requests.add(request_id)
-
-            return True
-
-        except Exception as e:
-            logger.error(
-                "Failed to batch message to specific connection",
-                connection_id=connection_id,
-                request_id=request_id,
-                error=str(e),
-            )
-            return False
-
-    async def _send_to_specific_connection(
-        self, connection_id: str, request_id: str, message
-    ) -> bool:
-        """Send ANPX message to a specific connection."""
-        conn_info = self.websocket_manager.connections.get(connection_id)
-
-        if not conn_info or not conn_info.authenticated:
-            logger.warning(
-                "Target connection not available",
-                connection_id=connection_id,
-                request_id=request_id,
-            )
-            return False
-
-        try:
-            # Send message
-            await self.websocket_manager._send_message(conn_info, message)
-
-            # Track routing with timestamp for cleanup
-            self.websocket_manager.request_routing[request_id] = connection_id
-            self.websocket_manager.request_timestamps[request_id] = (
-                asyncio.get_event_loop().time()
-            )
-            conn_info.pending_requests.add(request_id)
-
-            return True
-
-        except Exception as e:
-            logger.error(
-                "Failed to send to specific connection",
-                connection_id=connection_id,
-                request_id=request_id,
-                error=str(e),
-            )
-            return False
-
-    async def _handle_websocket_response(self, request_id: str, message) -> None:
-        """Handle response received from WebSocket."""
-        await self.response_handler.handle_response(request_id, message)
-
-    async def _handle_websocket_error(self, request_id: str, message) -> None:
-        """Handle error received from WebSocket."""
-        await self.response_handler.handle_error(request_id, message)
-
-    async def _convert_anpx_to_response(self, message) -> Response:
-        """Convert ANPX message to HTTP response."""
-        resp_meta = message.get_resp_meta()
-        body = message.get_http_body()
-
-        return Response(
-            content=body,
-            status_code=resp_meta.status if resp_meta else 500,
-            headers=resp_meta.headers if resp_meta else {},
+            "ANPGateway initialized",
+            ping_interval=ping_interval,
+            connection_timeout=connection_timeout,
+            response_timeout=response_timeout,
+            heartbeat_interval=heartbeat_interval,
         )
 
     async def start(self) -> None:
-        """Start the gateway server with smart routing."""
-        try:
-            # Start HTTP server (lifespan will handle WebSocket startup)
-            config = uvicorn.Config(
-                app=self.app,
-                host=self.config.host,
-                port=self.config.port,
-                log_config=None,  # We handle logging ourselves
-                access_log=False,
-                server_header=False,
-                date_header=False,
-                lifespan="on",  # Enable lifespan events
-            )
-
-            server = uvicorn.Server(config)
-            self._server_task = asyncio.create_task(server.serve())
-
-            logger.info(
-                "Gateway server started",
-                http_host=self.config.host,
-                http_port=self.config.port,
-                wss_host=self.config.wss_host,
-                wss_port=self.config.wss_port,
-                smart_routing=self.config.enable_smart_routing,
-            )
-
-        except Exception as e:
-            logger.error("Failed to start gateway server", error=str(e))
-            await self.stop()
-            raise
-
-    async def _initialize_smart_router(self) -> None:
-        """Initialize smart router."""
-        try:
-            if not self.websocket_manager.service_registry:
-                logger.warning("Service registry not available, smart routing disabled")
-                return
-
-            # Initialize smart router
-            self.smart_router = SmartRouter(self.websocket_manager.service_registry)
-
-            logger.info("Smart router initialized")
-
-        except Exception as e:
-            logger.error("Failed to initialize smart router", error=str(e))
-            self.smart_router = None
-
-    async def stop(self) -> None:
-        """Stop the gateway server."""
-        logger.info("Stopping gateway server")
-
-        # Stop HTTP server (lifespan will handle WebSocket shutdown)
-        if self._server_task:
-            self._server_task.cancel()
-            try:
-                await self._server_task
-            except asyncio.CancelledError:
-                logger.debug("Server task cancelled during stop")
-
-        logger.info("Gateway server stopped")
-
-    async def run(self) -> None:
-        """Run the gateway server with graceful shutdown."""
-        with GracefulShutdown() as shutdown:
-            try:
-                await self.start()
-
-                # Wait for shutdown signal
-                await shutdown.wait_for_shutdown()
-
-            finally:
-                await self.stop()
-
-    async def get_stats(self) -> dict[str, Any]:
-        """Get server statistics."""
-        ws_stats = await self.websocket_manager.get_connection_stats()
-        response_stats = self.response_handler.get_stats()
-
-        base_stats = {
-            "gateway": {
-                "host": self.config.host,
-                "port": self.config.port,
-                "wss_host": self.config.wss_host,
-                "wss_port": self.config.wss_port,
-            },
-            "websocket": ws_stats,
-            "response_handler": response_stats,
-            "auth_enabled": self.config.auth.enabled,
-            "tls_enabled": self.config.tls.enabled,
-        }
-
-        # Add smart routing statistics
-        if self.config.enable_smart_routing:
-            base_stats["smart_routing"] = {
-                "enabled": True,
-                "router_initialized": self.smart_router is not None,
-            }
-        else:
-            base_stats["smart_routing"] = {"enabled": False}
-
-        # Add message batching statistics
-        base_stats["message_batching"] = self.message_batcher.get_batch_stats()
-
-        return base_stats
-
-    async def _startup(self) -> None:
-        """Application startup tasks."""
-        try:
-            # Start WebSocket server
-            await self.websocket_manager.start_server()
-
-            # Initialize smart router if enabled
-            if self.config.enable_smart_routing:
-                await self._initialize_smart_router()
-
-            logger.info("Application started successfully")
-        except Exception as e:
-            logger.error("Failed to start application", error=str(e))
-            raise
-
-    async def _shutdown(self) -> None:
-        """Application shutdown tasks."""
-        if hasattr(self, "_shutdown_called") and self._shutdown_called:
-            logger.debug("Shutdown already called, skipping")
+        """启动网关"""
+        if self._running:
             return
 
-        self._shutdown_called = True
+        # 启动所有管理器
+        await self.connection_manager.start()
+        await self.message_handler.start()
+        await self.registry_manager.start()
+
+        # 启动路由清理任务
+        self._route_cleanup_task = asyncio.create_task(self._route_cleanup_loop())
+
+        self._running = True
+        logger.info("ANPGateway started successfully")
+
+    async def stop(self) -> None:
+        """停止网关"""
+        if not self._running:
+            return
+
+        self._running = False
+
+        # 停止路由清理任务
+        if self._route_cleanup_task:
+            self._route_cleanup_task.cancel()
+            try:
+                await self._route_cleanup_task
+            except asyncio.CancelledError:
+                pass
+
+        # 停止所有管理器
+        await self.registry_manager.stop()
+        await self.message_handler.stop()
+        await self.connection_manager.stop()
+
+        logger.info("ANPGateway stopped")
+
+    async def handle_websocket_connection(
+        self, websocket: WebSocket, connection_id: str | None = None
+    ) -> None:
+        """处理 WebSocket 连接"""
+        if not connection_id:
+            import uuid
+
+            connection_id = str(uuid.uuid4())
+
+        await websocket.accept()
+        logger.info(f"WebSocket connection accepted: {connection_id}")
+
         try:
-            # Stop WebSocket server
-            if self.websocket_manager:
-                await self.websocket_manager.stop_server()
+            # 添加连接
+            connection = await self.connection_manager.add_connection(
+                connection_id, websocket
+            )
 
-            # Cancel any running tasks
-            if self._server_task:
-                self._server_task.cancel()
-                try:
-                    await self._server_task
-                except asyncio.CancelledError:
-                    logger.debug("Server task cancelled during shutdown")
+            # 处理连接消息
+            await self._handle_websocket_messages(connection)
 
-            logger.info("Application shutdown completed")
+        except WebSocketDisconnect:
+            logger.info(f"WebSocket disconnected: {connection_id}")
         except Exception as e:
-            logger.error("Error during application shutdown", error=str(e))
+            logger.error(f"WebSocket error for {connection_id}: {e}")
+        finally:
+            # 清理连接
+            await self._cleanup_connection(connection_id)
+
+    async def handle_raw_websocket_connection(
+        self, websocket, path: str, connection_id: str | None = None
+    ) -> None:
+        """处理原始 WebSocket 连接（用于独立的 WebSocket 服务器）"""
+        import uuid
+
+        if not connection_id:
+            connection_id = str(uuid.uuid4())
+
+        logger.info(
+            f"Raw WebSocket connection accepted: {connection_id} (path: {path})"
+        )
+
+        try:
+            # 🆕 尝试头部认证支持
+            authenticated_via_headers = False
+            if (
+                hasattr(websocket, "request_headers")
+                and self.auth_config.did_wba_enabled
+            ):
+                did_result = await self._verify_did_headers(websocket)
+                if did_result.success:
+                    logger.info(
+                        f"Connection {connection_id} authenticated via headers with DID: {did_result.did}"
+                    )
+                    authenticated_via_headers = True
+
+                    # 直接注册服务
+                    registration = await self._register_service_from_headers(
+                        connection_id, did_result.did, websocket
+                    )
+
+                    if registration:
+                        # 创建连接信息（使用原始websocket对象）
+                        connection = await self.connection_manager.add_raw_connection(
+                            connection_id, websocket
+                        )
+
+                        # 认证成功，更新连接状态
+                        self.connection_manager.authenticate_connection(
+                            connection_id,
+                            registration.did,
+                            list(registration.advertised_paths),
+                        )
+
+                        # 添加路由 - 直接使用连接对象
+                        for path in registration.advertised_paths:
+                            self.request_router.add_path_route(path, connection)
+
+                        logger.info(
+                            f"Connection {connection_id} authenticated and services registered via headers"
+                        )
+                    else:
+                        logger.error(
+                            f"Failed to register services for authenticated connection {connection_id}"
+                        )
+                        return
+                else:
+                    logger.warning(
+                        f"Header authentication failed for connection {connection_id}: {did_result.error}"
+                    )
+
+            # 如果没有通过头部认证，使用传统方式
+            if not authenticated_via_headers:
+                # 创建连接信息（使用原始websocket对象）
+                connection = await self.connection_manager.add_raw_connection(
+                    connection_id, websocket
+                )
+
+            # 处理连接消息
+            await self._handle_raw_websocket_messages(connection)
+
+        except Exception as e:
+            logger.error(f"Raw WebSocket error for {connection_id}: {e}")
+        finally:
+            # 清理连接
+            await self._cleanup_connection(connection_id)
+
+    async def _handle_raw_websocket_messages(self, connection: ConnectInfo) -> None:
+        """处理原始 WebSocket 消息"""
+        websocket = connection.websocket
+        connection_id = connection.connection_id
+
+        try:
+            async for message in websocket:
+                try:
+                    # 更新连接活动时间
+                    connection.update_activity()
+
+                    # 处理不同类型的消息
+                    if isinstance(message, str):
+                        # JSON 控制消息
+                        try:
+                            ws_message = json.loads(message)
+                            await self._handle_websocket_message(connection, ws_message)
+                        except json.JSONDecodeError:
+                            logger.warning(f"Invalid JSON message from {connection_id}")
+                    elif isinstance(message, bytes):
+                        # 二进制数据消息（ANPX 协议）
+                        await self.message_handler.handle_raw_message(
+                            connection, message
+                        )
+                    else:
+                        logger.warning(
+                            f"Unknown message type from {connection_id}: {type(message)}"
+                        )
+
+                except Exception as e:
+                    logger.error(
+                        f"Error processing raw WebSocket message from {connection_id}: {e}"
+                    )
+                    break
+
+        except Exception as e:
+            logger.error(
+                f"Error in raw WebSocket message loop for {connection_id}: {e}"
+            )
+        finally:
+            logger.info(f"Raw WebSocket message handling ended for {connection_id}")
+
+    async def _handle_websocket_messages(self, connection: ConnectInfo) -> None:
+        """处理 WebSocket 消息"""
+        websocket = connection.websocket
+        connection_id = connection.connection_id
+
+        while True:
+            try:
+                # 接收消息
+                message = await websocket.receive_text()
+
+                # 更新连接活动时间
+                connection.update_activity()
+
+                # 解析消息
+                import json
+
+                try:
+                    ws_message = json.loads(message)
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON message from {connection_id}")
+                    continue
+
+                # 处理不同类型的消息
+                await self._handle_websocket_message(connection, ws_message)
+
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                logger.error(
+                    f"Error processing WebSocket message from {connection_id}: {e}"
+                )
+                break
+
+    async def _handle_websocket_message(
+        self, connection: ConnectInfo, message: dict[str, Any]
+    ) -> None:
+        """处理 WebSocket 消息"""
+        message_type = message.get("type")
+        connection_id = connection.connection_id
+
+        if message_type == "authentication":
+            # 处理认证消息
+            await self._handle_authentication(connection, message)
+
+        elif message_type == "heartbeat":
+            # 处理心跳消息
+            self._handle_heartbeat(connection)
+
+        elif message_type == "http_response":
+            # 处理 HTTP 响应
+            self.message_handler.handle_websocket_message(message)
+
+        else:
+            logger.debug(f"Unknown message type from {connection_id}: {message_type}")
+
+    async def _handle_authentication(
+        self, connection: ConnectInfo, message: dict[str, Any]
+    ) -> None:
+        """处理认证消息"""
+        data = message.get("data", {})
+        did_token = data.get("did_token")
+
+        if not did_token:
+            logger.warning(
+                f"Authentication failed - missing DID token: {connection.connection_id}"
+            )
+            return
+
+        # 注册服务
+        registration = await self.registry_manager.register_service(
+            connection.connection_id, did_token, connection.websocket
+        )
+
+        if registration:
+            # 认证成功，更新连接状态
+            self.connection_manager.authenticate_connection(
+                connection.connection_id,
+                registration.did,
+                list(registration.advertised_paths),
+            )
+
+            # 添加路由 - 直接使用连接对象
+            for path in registration.advertised_paths:
+                self.request_router.add_path_route(path, connection)
+
+            logger.info(
+                f"Connection authenticated and services registered: {connection.connection_id}"
+            )
+        else:
+            logger.warning(f"Service registration failed: {connection.connection_id}")
+
+    def _handle_heartbeat(self, connection: ConnectInfo) -> None:
+        """处理心跳消息"""
+        connection.update_ping()
+        self.registry_manager.update_heartbeat(connection.connection_id)
+        logger.debug(f"Heartbeat received: {connection.connection_id}")
+
+    async def _cleanup_connection(self, connection_id: str) -> None:
+        """清理连接"""
+        # 移除路由
+        self.request_router.remove_connection_routes(connection_id)
+
+        # 注销服务
+        self.registry_manager.unregister_service(connection_id)
+
+        # 移除连接
+        await self.connection_manager.remove_connection(connection_id)
+
+        logger.info(f"Connection cleaned up: {connection_id}")
+
+    async def _verify_did_headers(self, websocket):
+        """Verify DID-WBA headers during WS handshake."""
+        try:
+            # Derive service domain for signature verification:
+            # 1) X-Forwarded-Host (first, if behind reverse proxy)
+            # 2) Host header
+            # 3) Fallback to websocket.host or "localhost"
+            headers = getattr(websocket, "request_headers", None)
+            forwarded_host = None
+            host_header = None
+            try:
+                if headers is not None:
+                    # Some servers expose CIMultiDict-like, others dict-like
+                    forwarded_host = (
+                        headers.get("X-Forwarded-Host")
+                        if hasattr(headers, "get")
+                        else None
+                    )
+                    if not forwarded_host and hasattr(headers, "get"):
+                        forwarded_host = headers.get("x-forwarded-host")
+
+                    host_header = (
+                        headers.get("Host") if hasattr(headers, "get") else None
+                    )
+                    if not host_header and hasattr(headers, "get"):
+                        host_header = headers.get("host")
+            except Exception:
+                forwarded_host = None
+                host_header = None
+
+            def _extract_hostname(value: str | None) -> str | None:
+                if not value:
+                    return None
+                # Support comma-separated (first hop), and strip port
+                first = str(value).split(",")[0].strip()
+                # IPv6 literals may be in [::1]:port, strip brackets then port
+                if first.startswith("[") and "]" in first:
+                    first = first[1 : first.index("]")]
+                return first.split(":")[0].strip() or None
+
+            domain = (
+                _extract_hostname(forwarded_host)
+                or _extract_hostname(host_header)
+                or getattr(websocket, "host", None)
+                or "localhost"
+            )
+
+            logger.info(
+                f"Verifying DID-WBA headers for domain: {domain}",
+            )
+
+            result = await self.did_wba_verifier.verify(
+                websocket.request_headers, domain
+            )
+            if result.success:
+                logger.info("DID-WBA authenticated", did=result.did)
+            else:
+                logger.warning("DID-WBA auth failed", error=result.error)
+            return result
+        except Exception as e:
+            logger.error("DID-WBA verification error", error=str(e))
+            return DidAuthResult(success=False, error=str(e))
+
+    async def _register_service_from_headers(
+        self, connection_id: str, did: str, websocket
+    ):
+        """Register service using DID from headers authentication."""
+        try:
+            # Create a mock registration for header-based auth
+            import time
+
+            from .registry import ServiceRegistration
+
+            # Read advertised paths from database only (did_proxy_path)
+            resolver = get_did_service_resolver()
+            normalized = resolver.get_advertised_services(did)
+            if not normalized:
+                logger.error(
+                    "No advertised paths found in database for header-based registration",
+                    did=did,
+                )
+                return None
+
+            registration = ServiceRegistration(
+                connection_id=connection_id,
+                did=did,
+                advertised_paths=set(normalized),
+                registered_at=time.time(),
+                last_heartbeat=time.time(),
+            )
+
+            # Store registration in registry manager
+            self.registry_manager._registrations[connection_id] = registration
+            self.registry_manager._did_to_connection[did] = connection_id
+
+            # Update path mappings
+            for path in normalized:
+                if path not in self.registry_manager._path_to_connections:
+                    self.registry_manager._path_to_connections[path] = set()
+                self.registry_manager._path_to_connections[path].add(connection_id)
+
+                # 获取连接信息并注册路由到路由器
+                connection_info = self.connection_manager.get_connection(connection_id)
+                if connection_info:
+                    self.request_router.add_path_route(path, connection_info)
+
+            logger.info(
+                f"Service registered from headers: connection_id={connection_id}, did={did}, paths={normalized}"
+            )
+            return registration
+
+        except Exception as e:
+            logger.error(f"Failed to register service from headers: {e}")
+            return None
+
+    def _init_malicious_patterns(self) -> None:
+        """初始化恶意请求模式"""
+        import re
+
+        # 核心恶意模式（高频检测）
+        self._core_patterns = {
+            "/wp-admin/",
+            "/wp-includes/",
+            "/wordpress/",
+            "/xmlrpc.php",
+            "/wp-config.php",
+            "/wp-content/",
+            "/wp-json/",
+            "/admin/",
+            "/administrator/",
+            "/phpmyadmin/",
+            "/mysql/",
+            "/cpanel/",
+            "/webmail/",
+            "/mail/",
+            "/ftp/",
+            "/ssh/",
+            "/telnet/",
+            "/shell/",
+            "/cmd/",
+            "/exec/",
+            "/system/",
+            "/eval/",
+            "/assert/",
+            "/include/",
+            "/require/",
+        }
+
+        # 协议包装器模式（需要正则匹配）
+        self._protocol_patterns = [
+            r"/(file|data|php|expect|input|filter|zip|phar|ogg|rar|zlib|bzip2|quoted-printable|rot13)://",
+            r"/convert\.(iconv|base64|quoted-printable|uuencode)\.",
+            r"/convert\.(base64|quoted-printable|uuencode)-(decode|encode)",
+            r"/convert\.iconv\.(utf-[0-9]+|utf-[0-9]+le|utf-[0-9]+be)\.(utf-[0-9]+|utf-[0-9]+le|utf-[0-9]+be)",
+        ]
+
+        # 预编译正则表达式
+        self._protocol_regex = re.compile(
+            "|".join(self._protocol_patterns), re.IGNORECASE
+        )
+
+    def _is_malicious_request(self, request_path: str) -> bool:
+        """检测恶意请求 - 优化版本"""
+        if not request_path:
+            return False
+
+        request_path_lower = request_path.lower()
+
+        # 1. 快速检查核心模式（集合查找，O(1)）
+        for pattern in self._core_patterns:
+            if pattern in request_path_lower:
+                return True
+
+        # 2. 正则匹配协议包装器（更精确）
+        if self._protocol_regex.search(request_path):
+            return True
+
+        return False
+
+    async def _route_cleanup_loop(self) -> None:
+        """定期清理不健康路由的循环任务"""
+        while self._running:
+            try:
+                # 清理不健康的路由
+                cleaned_count = self.request_router.cleanup_unhealthy_routes()
+                if cleaned_count > 0:
+                    logger.info(f"Cleaned up {cleaned_count} unhealthy routes")
+
+                await asyncio.sleep(self._route_cleanup_interval)
+            except Exception as e:
+                logger.error(f"Route cleanup error: {e}")
+                await asyncio.sleep(30.0)  # 出错时短暂等待
+
+    async def handle_http_request(self, request: Request) -> Response:
+        """处理 HTTP 请求"""
+        if not self._running:
+            from starlette.responses import JSONResponse
+
+            return JSONResponse({"error": "Gateway not running"}, status_code=503)
+
+        # 提取请求路径
+        request_path = str(request.url.path)
+
+        # 过滤恶意请求
+        if self._is_malicious_request(request_path):
+            logger.warning(f"Malicious request blocked: {request_path}")
+            from starlette.responses import JSONResponse
+
+            return JSONResponse({"error": "Forbidden"}, status_code=403)
+
+        # 路由请求 - 直接获取连接对象
+        target_connection = self.request_router.route_request(request_path)
+
+        if not target_connection:
+            logger.info(f"No route found for path: {request_path}")
+            from starlette.responses import JSONResponse
+
+            return JSONResponse(
+                {"error": "No route found", "path": request_path}, status_code=404
+            )
+
+        # 检查连接健康状态
+        if not target_connection.is_healthy:
+            logger.warning(
+                f"Target connection unavailable: {target_connection.connection_id}"
+            )
+            from starlette.responses import JSONResponse
+
+            return JSONResponse(
+                {
+                    "error": "Service unavailable",
+                    "connection": target_connection.connection_id,
+                },
+                status_code=503,
+            )
+
+        # 转发请求
+        try:
+            response = await self.message_handler.handle_http_request(
+                request, target_connection.websocket
+            )
+
+            logger.info(
+                "HTTP request handled successfully",
+                path=request_path,
+                connection=target_connection.connection_id,
+                status=response.status_code,
+            )
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error handling HTTP request: {e}")
+            from starlette.responses import JSONResponse
+
+            return JSONResponse(
+                {"error": "Internal server error", "details": str(e)}, status_code=500
+            )
+
+    def get_gateway_stats(self) -> dict[str, Any]:
+        """获取网关统计信息"""
+        return {
+            "running": self._running,
+            "connections": self.connection_manager.get_stats(),
+            "routing": self.request_router.get_routing_stats(),
+            "messages": self.message_handler.get_handler_stats(),
+            "registry": self.registry_manager.get_stats(),
+        }
+
+    async def health_check(self) -> dict[str, Any]:
+        """健康检查"""
+        stats = self.get_gateway_stats()
+
+        # 评估健康状态
+        is_healthy = self._running and stats["connections"]["healthy_connections"] > 0
+
+        return {
+            "status": "healthy" if is_healthy else "degraded",
+            "timestamp": asyncio.get_event_loop().time(),
+            "details": stats,
+        }
+
+
+class ANPGatewayApp:
+    """ANP 网关应用 - FastAPI 集成"""
+
+    def __init__(self, gateway: ANPGateway):
+        self.gateway = gateway
+
+    def create_app(self) -> FastAPI:
+        """创建 FastAPI 应用"""
+
+        @asynccontextmanager
+        async def lifespan(app: FastAPI):
+            # 启动时执行
+            await self.gateway.start()
+            yield
+            # 关闭时执行
+            await self.gateway.stop()
+
+        app = FastAPI(
+            title="ANP Gateway",
+            description="World-class AI Agent Network Protocol Gateway",
+            version="1.0.0",
+            lifespan=lifespan,
+        )
+
+        # WebSocket 端点
+        @app.websocket("/ws")
+        async def websocket_endpoint(
+            websocket: WebSocket, connection_id: str | None = None
+        ):
+            await self.gateway.handle_websocket_connection(websocket, connection_id)
+
+        # HTTP 请求处理 - 捕获所有路径
+        @app.api_route(
+            "/{path:path}",
+            methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+        )
+        async def handle_all_requests(request: Request):
+            return await self.gateway.handle_http_request(request)
+
+        # 健康检查端点
+        @app.get("/health")
+        async def health_check():
+            return await self.gateway.health_check()
+
+        # 统计信息端点
+        @app.get("/stats")
+        async def get_stats():
+            return self.gateway.get_gateway_stats()
+
+        # 路由信息端点
+        @app.get("/routes")
+        async def get_routes():
+            # 获取所有路由连接
+            route_connections = self.gateway.request_router.list_all_connections()
+            healthy_connections = self.gateway.request_router.get_healthy_connections()
+
+            # 构建路由信息
+            routes_info = []
+            for path, connection in route_connections:
+                routes_info.append({
+                    "path": path,
+                    "connection_id": connection.connection_id,
+                    "did": connection.did,
+                    "healthy": connection.is_healthy,
+                    "age": connection.age,
+                    "last_activity": connection.last_activity,
+                })
+
+            healthy_routes_info = []
+            for path, connection in healthy_connections:
+                healthy_routes_info.append({
+                    "path": path,
+                    "connection_id": connection.connection_id,
+                    "did": connection.did,
+                })
+
+            return {
+                "routes": routes_info,
+                "healthy_routes": healthy_routes_info,
+                "total": len(routes_info),
+                "healthy_total": len(healthy_routes_info),
+            }
+
+        return app
+
+
+def create_gateway(
+    ping_interval: float = 30.0,
+    connection_timeout: float = 300.0,
+    response_timeout: float = 30.0,
+    heartbeat_interval: float = 60.0,
+    auth_config=None,
+) -> ANPGateway:
+    """创建网关实例"""
+    return ANPGateway(
+        ping_interval=ping_interval,
+        connection_timeout=connection_timeout,
+        response_timeout=response_timeout,
+        heartbeat_interval=heartbeat_interval,
+        auth_config=auth_config,
+    )
+
+
+def create_app(gateway: ANPGateway | None = None) -> FastAPI:
+    """创建网关应用"""
+    if gateway is None:
+        gateway = create_gateway()
+
+    app_wrapper = ANPGatewayApp(gateway)
+    return app_wrapper.create_app()
+
+
+# 便捷的应用创建
+app = create_app()
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    from anp_proxy.common.config import get_default_bind_host
+
+    uvicorn.run(
+        "anp_proxy.gateway.server:app",
+        host=get_default_bind_host(),
+        port=8000,
+        log_level="info",
+        reload=True,
+    )

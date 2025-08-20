@@ -3,7 +3,7 @@
 import asyncio
 from datetime import datetime, timedelta
 
-from .db_base import DatabaseAdapter
+from .db_base import execute_query
 from .log_base import get_logger
 
 logger = get_logger(__name__)
@@ -12,14 +12,14 @@ logger = get_logger(__name__)
 class ServiceRegistry:
     """service registry with direct service_url->ConnectionInfo mapping."""
 
-    def __init__(self, db_adapter: DatabaseAdapter) -> None:
+    def __init__(self) -> None:
         """
         Initialize service registry.
 
         Args:
-            db_adapter: Database adapter for service URL lookup
+            None
         """
-        self.db = db_adapter
+        # Database access is via KISS functions execute_query/execute_upsert
 
         # 🎯 Core storage: Direct service_url -> connection mapping for O(1) lookup (1:1 relationship)
         self._service_connections: dict[
@@ -107,22 +107,9 @@ class ServiceRegistry:
                     "No services found in database for DID",
                     did=did,
                     connection_id=connection_id,
-                    database_available=self.db is not None,
-                    database_pool=self.db.pool is not None if self.db else None,
+                    database_available=True,
+                    database_pool=None,
                 )
-
-                # Fallback: create default service mappings for known DIDs
-                # This helps ensure services show up even without database entries
-                if did in ["did:wba:agent1", "did:wba:agent2"]:  # Common test DIDs
-                    logger.info(
-                        "Creating fallback service mappings for known DID", did=did
-                    )
-                    if "agent1" in did:
-                        service_urls = ["api.agent.com/anpproxy1"]
-                    elif "agent2" in did:
-                        service_urls = ["api.agent.com/anpproxy2"]
-                else:
-                    return []
 
             # 🎯 Build direct service_url -> conn_info mapping (1:1 relationship)
             for service_url in service_urls:
@@ -183,8 +170,11 @@ class ServiceRegistry:
         """
         Database-driven service discovery ONLY - exact match only.
 
-        Strictly uses exact service_url -> connection mapping from database.
-        No fallback strategies (protocol-agnostic, prefix, domain matching).
+        Strategy:
+        1. Try exact match from memory (active connections)
+        2. Query database for service URL mapping to DID
+        3. Find active connections for that DID
+        4. Try path matching for microservices
 
         Args:
             service_url: Service URL to find connections for
@@ -195,22 +185,46 @@ class ServiceRegistry:
         connections = []
 
         try:
-            # Only exact match from database mapping - no fallback strategies
+            # Strategy 1: Exact match from memory (active connections)
             exact_match = self._service_connections.get(service_url)
             if exact_match:
                 connections.append(exact_match)
                 logger.debug(
-                    "Database-driven exact match found",
+                    "Memory exact match found",
                     service_url=service_url,
                     connection_id=exact_match.connection_id,
                 )
-            else:
-                logger.debug(
-                    "No database mapping found for service",
-                    service_url=service_url,
-                )
+                return connections
 
-            return connections
+            # Strategy 2: Database-driven path mapping
+            db_connections = await self._find_connections_by_database_mapping(
+                service_url
+            )
+            if db_connections:
+                logger.debug(
+                    "Database path mapping found",
+                    service_url=service_url,
+                    connections_count=len(db_connections),
+                )
+                return db_connections
+
+            # Strategy 3: Path prefix matching for microservices
+            path_connections = await self._find_connections_by_path_matching(
+                service_url
+            )
+            if path_connections:
+                logger.debug(
+                    "Path prefix matching found",
+                    service_url=service_url,
+                    connections_count=len(path_connections),
+                )
+                return path_connections
+
+            logger.debug(
+                "No connections found for service",
+                service_url=service_url,
+            )
+            return []
 
         except Exception as e:
             logger.error(
@@ -495,7 +509,15 @@ class ServiceRegistry:
             return self._service_cache[did]
 
         # Cache miss or expired - query database
-        service_urls = self.db.get_services_by_did(did)
+        rows = execute_query(
+            """
+            SELECT proxy_path FROM did_proxy_path
+            WHERE did = %s
+            ORDER BY created_at
+            """,
+            (did,),
+        )
+        service_urls = [row["proxy_path"] for row in rows]
 
         logger.debug(
             "Database query for DID services",
@@ -581,3 +603,135 @@ class ServiceRegistry:
             "cache_ttl_minutes": self.cache_ttl.total_seconds() / 60,
             "service_mappings": service_mappings,
         }
+
+    async def _find_connections_by_database_mapping(
+        self, service_url: str
+    ) -> list[object]:
+        """
+        Find connections by querying database for service URL to DID mapping.
+
+        Strategy:
+        1. Query database for DIDs that have this service URL
+        2. Find active connections for those DIDs
+
+        Args:
+            service_url: Service URL to look up
+
+        Returns:
+            List of ConnectionInfo objects for DIDs that have this service
+        """
+        connections = []
+
+        try:
+            if not self.db:
+                return []
+
+            # Query database to find which DIDs have this service URL
+            query = "SELECT DISTINCT did FROM did_proxy_path WHERE proxy_path = %s"
+            result = execute_query(query, (service_url,))
+
+            if not result:
+                logger.debug(f"No DIDs found for service URL: {service_url}")
+                return []
+
+            # For each DID that has this service, find active connections
+            for row in result:
+                did = row["did"]
+                logger.debug(f"Found DID {did} has service {service_url}")
+
+                # Find active connections for this DID
+                for connection_id, metadata in self._connection_metadata.items():
+                    if metadata.get("did") == did:
+                        # Find the connection object in service mappings
+                        for conn_info in self._service_connections.values():
+                            if (
+                                hasattr(conn_info, "connection_id")
+                                and conn_info.connection_id == connection_id
+                            ):
+                                connections.append(conn_info)
+                                logger.info(
+                                    f"Database mapping: {service_url} -> DID {did} -> Connection {connection_id}"
+                                )
+                                break
+                        break
+
+        except Exception as e:
+            logger.error(f"Database mapping lookup failed for {service_url}: {e}")
+
+        return connections
+
+    async def _find_connections_by_path_matching(
+        self, service_url: str
+    ) -> list[object]:
+        """
+        Find connections using intelligent path matching for microservices.
+
+        Strategy:
+        1. Extract path components from service URL
+        2. Try progressively shorter path prefixes
+        3. Match against registered services in memory
+
+        Args:
+            service_url: Service URL to match (e.g., "localhost:8089/agents/jsonrpc")
+
+        Returns:
+            List of ConnectionInfo objects that can handle this path
+        """
+        connections = []
+
+        try:
+            # Extract path from service URL
+            if "/" not in service_url:
+                return []
+
+            # Split service URL into host and path
+            parts = service_url.split("/")
+            if len(parts) < 2:
+                return []
+
+            host = parts[0]
+            path_segments = parts[1:]
+
+            logger.debug(
+                f"Path matching for {service_url}: host={host}, segments={path_segments}"
+            )
+
+            # Try progressively shorter path prefixes
+            for i in range(len(path_segments), 0, -1):
+                prefix_segments = path_segments[:i]
+                test_paths = [
+                    f"{host}/"
+                    + "/".join(prefix_segments),  # e.g., "localhost:8089/agents"
+                    "/".join(prefix_segments),  # e.g., "agents"
+                ]
+
+                for test_path in test_paths:
+                    logger.debug(f"Testing path prefix: {test_path}")
+                    exact_match = self._service_connections.get(test_path)
+                    if exact_match:
+                        connections.append(exact_match)
+                        logger.info(f"Path prefix match: {service_url} -> {test_path}")
+                        return connections
+
+            # Try database path matching if memory matching failed
+            for i in range(len(path_segments), 0, -1):
+                prefix_segments = path_segments[:i]
+                test_paths = [
+                    f"{host}/" + "/".join(prefix_segments),
+                    "/".join(prefix_segments),
+                ]
+
+                for test_path in test_paths:
+                    db_connections = await self._find_connections_by_database_mapping(
+                        test_path
+                    )
+                    if db_connections:
+                        logger.info(
+                            f"Database path prefix match: {service_url} -> {test_path}"
+                        )
+                        return db_connections
+
+        except Exception as e:
+            logger.error(f"Path matching failed for {service_url}: {e}")
+
+        return connections

@@ -1,7 +1,7 @@
 # ANP Proxy Configuration
 
-# Operating mode: "gateway", "receiver", or "both"
-mode = "both"
+# Operating mode: "gateway" only
+mode = "gateway"
 
 # Enable debug mode
 debug = false
@@ -13,11 +13,11 @@ format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 [gateway]
 # HTTP server settings
 host = "0.0.0.0"
-port = 8089
+port = 9877
 
 # WebSocket server settings
 wss_host = "0.0.0.0"
-wss_port = 8789
+wss_port = 9878
 
 # Connection limits
 max_connections = 100
@@ -34,16 +34,12 @@ verify_mode = "required"
 
 [gateway.auth]
 enabled = true
-token_expiry = 3600 # 1 hour
+token_expiry = 3600  # 1 hour
 max_attempts = 3
 did_wba_enabled = true
-did_document_path = "docs/did_info/did-wba-didhost.cc-anpproxy-did-doc.json"
-private_key_path = "docs/did_info/did-wba-didhost.cc-anpproxy-private-key.pem"
-allowed_dids = [
-    "did:wba:didhost.cc:anpproxy",
-    "did:wba:didhost.cc:anpproxy1",
-    "did:wba:didhost.cc:anpproxy2",
-]
+did_document_path = "docs/did_info/did-wba-didhost.cc-test-public-did-doc.json"
+private_key_path = "docs/did_info/did-wba-didhost.cc-test-public-private-key.pem"
+allowed_dids = ["did:wba:didhost.cc:test:public"]
 
 [gateway.database]
 enabled = true
@@ -56,41 +52,3 @@ charset = "utf8mb4"
 connect_timeout = 5.0
 min_connections = 2
 max_connections = 20
-
-[receiver]
-# Gateway connection
-gateway_url = "ws://localhost:8789"
-
-# Local application settings
-local_host = "127.0.0.1"
-local_port = 8000
-
-# Connection settings
-timeout = 30.0
-keepalive_interval = 60.0
-ping_interval = 10.0
-
-# Reconnection settings
-reconnect_enabled = true
-reconnect_delay = 5.0
-max_reconnect_attempts = 10
-
-# Protocol settings
-chunk_size = 65536 # 64KB
-
-[receiver.tls]
-enabled = false
-verify_mode = "required"
-
-[receiver.auth]
-enabled = true
-token_expiry = 3600
-max_attempts = 3
-did_wba_enabled = true
-did_document_path = "docs/did_info/did-wba-didhost.cc-anpproxy-did-doc.json"
-private_key_path = "docs/did_info/did-wba-didhost.cc-anpproxy-private-key.pem"
-allowed_dids = [
-    "did:wba:didhost.cc:anpproxy",
-    "did:wba:didhost.cc:anpproxy1",
-    "did:wba:didhost.cc:anpproxy2",
-]

@@ -8,7 +8,7 @@ It reuses the authentication capabilities from the existing ANPTool.
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import aiohttp
 
@@ -71,9 +71,9 @@ class ANPClient:
         self,
         url: str,
         method: str = "GET",
-        headers: Optional[dict[str, str]] = None,
-        params: Optional[dict[str, Any]] = None,
-        body: Optional[dict[str, Any]] = None,
+        headers: dict[str, str] | None = None,
+        params: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         Fetch content from a URL with DID authentication.

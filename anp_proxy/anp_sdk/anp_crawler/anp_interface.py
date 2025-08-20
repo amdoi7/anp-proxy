@@ -7,7 +7,7 @@ to OpenAI Tools JSON format, and execute tool calls by sending HTTP requests.
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from .anp_client import ANPClient
 
@@ -212,7 +212,7 @@ class ANPInterfaceConverter:
 
     def convert_to_openai_tools(
         self, interface_data: dict[str, Any]
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Convert JSON-RPC or OpenRPC interface definition to OpenAI Tools format.
 
@@ -267,7 +267,7 @@ class ANPInterfaceConverter:
 
     def create_anp_interface(
         self, interface_data: dict[str, Any], anp_client: ANPClient
-    ) -> Optional[ANPInterface]:
+    ) -> ANPInterface | None:
         """
         Create an ANPInterface instance from interface data.
 

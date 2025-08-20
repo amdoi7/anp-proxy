@@ -4,19 +4,28 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
-from pydantic_settings import BaseSettings
 
 from .constants import (
     DEFAULT_CHUNK_SIZE,
     DEFAULT_HTTP_PORT,
     DEFAULT_KEEPALIVE_INTERVAL,
     DEFAULT_MAX_CONNECTIONS,
-    DEFAULT_MAX_RECONNECT_ATTEMPTS,
     DEFAULT_PING_INTERVAL,
-    DEFAULT_RECONNECT_DELAY,
     DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_WSS_PORT,
 )
+
+
+def get_default_bind_host() -> str:
+    """Return default bind host depending on platform.
+
+    - macOS (Darwin): "0.0.0.0" so services are reachable from host/browser
+    - others: "127.0.0.1" for localhost-only by default
+    """
+    import platform
+
+    system_name = platform.system().lower()
+    return "0.0.0.0" if system_name == "darwin" else "127.0.0.1"
 
 
 class TLSConfig(BaseModel):
@@ -46,8 +55,6 @@ class DatabaseConfig(BaseModel):
     user: str = "anp_user"
     password: str = ""
     database: str = "anp_proxy"
-    min_connections: int = 5
-    max_connections: int = 20
     charset: str = "utf8mb4"
     connect_timeout: float = 10.0
 
@@ -95,11 +102,11 @@ class GatewayConfig(BaseModel):
     """Gateway-specific configuration."""
 
     # HTTP server settings
-    host: str = "0.0.0.0"
+    host: str = Field(default_factory=get_default_bind_host)
     port: int = DEFAULT_HTTP_PORT
 
     # WebSocket server settings
-    wss_host: str = "0.0.0.0"
+    wss_host: str = Field(default_factory=get_default_bind_host)
     wss_port: int = DEFAULT_WSS_PORT
 
     # Connection settings
@@ -123,75 +130,34 @@ class GatewayConfig(BaseModel):
     service_cache_ttl: int = 300  # Service discovery cache TTL in seconds
 
 
-class ReceiverConfig(BaseModel):
-    """Receiver-specific configuration."""
-
-    # Gateway connection
-    gateway_url: str = "wss://localhost:8765"
-
-    # Local app settings
-    local_host: str = "127.0.0.1"
-    local_port: int = 8000
-    local_app_module: str | None = None  # e.g., "myapp:app"
-
-    # Connection settings
-    timeout: float = DEFAULT_TIMEOUT_SECONDS
-    keepalive_interval: float = DEFAULT_KEEPALIVE_INTERVAL
-    ping_interval: float = DEFAULT_PING_INTERVAL
-
-    # Reconnection
-    reconnect_enabled: bool = True
-    reconnect_delay: float = DEFAULT_RECONNECT_DELAY
-    max_reconnect_attempts: int = DEFAULT_MAX_RECONNECT_ATTEMPTS
-
-    # Security
-    tls: TLSConfig = Field(default_factory=TLSConfig)
-    auth: AuthConfig = Field(default_factory=AuthConfig)
-
-    # Protocol settings
-    chunk_size: int = DEFAULT_CHUNK_SIZE
-
-    # Service advertising - list of service URLs this receiver handles
-    advertised_services: list[str] = Field(
-        default_factory=list
-    )  # e.g., ["https://api.example.com/v1", "https://chat.example.com"]
-
-
-class ANPConfig(BaseSettings):
+class ANPConfig(BaseModel):
     """Main ANP Proxy configuration."""
 
-    # Mode: "gateway", "receiver", or "both"
-    mode: str = "both"
+    # Mode: "gateway" only
+    mode: str = "gateway"
 
     # Component configurations
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
-    receiver: ReceiverConfig = Field(default_factory=ReceiverConfig)
 
     # Global settings
     logging: LogConfig = Field(default_factory=LogConfig)
     debug: bool = False
 
-    model_config = {
-        "env_prefix": "ANP_",
-        "env_nested_delimiter": "__",
-        "case_sensitive": False,
-    }
-
     @field_validator("mode")
     @classmethod
     def validate_mode(cls, v: str) -> str:
         """Validate mode value."""
-        if v not in ["gateway", "receiver", "both"]:
-            raise ValueError("mode must be one of: gateway, receiver, both")
+        if v not in ["gateway"]:
+            raise ValueError("mode must be: gateway")
         return v
 
     @classmethod
     def from_file(cls, config_file: Path) -> "ANPConfig":
-        """Load configuration from file."""
-        import tomli
+        """Load configuration from TOML file."""
+        import rtoml
 
-        with open(config_file, "rb") as f:
-            config_data = tomli.load(f)
+        with open(config_file, encoding="utf-8") as f:
+            config_data = rtoml.load(f)
 
         return cls(**config_data)
 
@@ -202,7 +168,7 @@ class ANPConfig(BaseSettings):
 
     def save_to_file(self, config_file: Path) -> None:
         """Save configuration to TOML file."""
-        import tomli_w
+        import rtoml
 
-        with open(config_file, "wb") as f:
-            tomli_w.dump(self.model_dump(), f)
+        with open(config_file, "w", encoding="utf-8") as f:
+            rtoml.dump(self.model_dump(), f)
