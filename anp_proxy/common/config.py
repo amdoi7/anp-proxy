@@ -12,7 +12,6 @@ from .constants import (
     DEFAULT_MAX_CONNECTIONS,
     DEFAULT_PING_INTERVAL,
     DEFAULT_TIMEOUT_SECONDS,
-    DEFAULT_WSS_PORT,
 )
 
 
@@ -100,10 +99,6 @@ class GatewayConfig(BaseModel):
     # HTTP server settings
     host: str = Field(default_factory=get_default_bind_host)
     port: int = DEFAULT_HTTP_PORT
-
-    # WebSocket server settings
-    wss_host: str = Field(default_factory=get_default_bind_host)
-    wss_port: int = DEFAULT_WSS_PORT
 
     # Connection settings
     max_connections: int = DEFAULT_MAX_CONNECTIONS

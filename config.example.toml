@@ -15,12 +15,8 @@ format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 [gateway]
 # HTTP server settings
-host = "127.0.0.1"
+host = "0.0.0.0"
 port = 9877
-
-# WebSocket server settings
-wss_host = "127.0.0.1"
-wss_port = 9878
 
 # Connection limits
 max_connections = 100
@@ -47,7 +43,7 @@ max_attempts = 3
 did_wba_enabled = false
 
 [gateway.database]
-enabled = false
+enabled = true
 # host = "localhost"
 # port = 3306
 # user = "anp_user"

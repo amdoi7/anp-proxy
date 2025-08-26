@@ -16,8 +16,6 @@ async def test_gateway_only():
     config = GatewayConfig(
         host="127.0.0.1",
         port=9080,
-        wss_host="127.0.0.1",
-        wss_port=9765,
         auth=AuthConfig(enabled=False),
         max_connections=10,
         timeout=30.0,

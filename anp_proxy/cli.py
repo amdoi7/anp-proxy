@@ -94,8 +94,6 @@ class ANPProxyApp:
 )
 @click.option("--gateway-host", help="Gateway HTTP host")
 @click.option("--gateway-port", type=int, help="Gateway HTTP port")
-@click.option("--wss-host", help="WebSocket server host")
-@click.option("--wss-port", type=int, help="WebSocket server port")
 @click.option(
     "--log-level",
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
@@ -107,23 +105,11 @@ def main(
     mode: str | None = None,
     gateway_host: str | None = None,
     gateway_port: int | None = None,
-    wss_host: str | None = None,
-    wss_port: int | None = None,
     log_level: str | None = None,
     debug: bool = False,
 ) -> None:
     """
     ANP Proxy - HTTP over WebSocket tunneling for private networks.
-
-    Examples:
-        # Run as Gateway
-        python -m anp_proxy --mode gateway --gateway-port 8089 --wss-port 8789
-
-        # Run as Gateway only
-        python -m anp_proxy --mode gateway --gateway-port 8080 --wss-port 8765
-
-        # With config file
-        python -m anp_proxy --config config.toml
     """
     try:
         # Load configuration
@@ -145,10 +131,7 @@ def main(
             anp_config.gateway.host = gateway_host
         if gateway_port:
             anp_config.gateway.port = gateway_port
-        if wss_host:
-            anp_config.gateway.wss_host = wss_host
-        if wss_port:
-            anp_config.gateway.wss_port = wss_port
+
         if log_level:
             anp_config.logging.level = log_level
         if debug:
