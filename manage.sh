@@ -25,13 +25,6 @@ ENTRY_CMD=""
 ENTRY_ARGS=""
 PID_MATCH=""
 
-# 修复 sudo 环境下找不到用户级 uv 的问题
-if [ -n "" ]; then
-    SUDO_HOME=
-    if [ -n "" ] && [ -d "/.local/bin" ]; then
-        export PATH="/.local/bin:/home/ubuntu/.local/bin:/home/ubuntu/.cursor-server/bin/af58d92614edb1f72bdd756615d131bf8dfa5290/bin/remote-cli:/home/ubuntu/.local/bin:/home/ubuntu/.local/share/pnpm:/home/ubuntu/.cursor-server/bin/af58d92614edb1f72bdd756615d131bf8dfa5290/bin/remote-cli:/home/ubuntu/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/ubuntu/.cursor-server/extensions/ms-python.debugpy-2025.6.0-linux-x64/bundled/scripts/noConfigScripts"
-    fi
-fi
 # 打印带颜色的消息
 print_info() {
     echo -e "${BLUE}[INFO]${NC} $1"

@@ -45,9 +45,6 @@ token_expiry = 3600 # 1 hour
 max_attempts = 3
 # DID-WBA settings
 did_wba_enabled = false
-# did_document_path = "docs/did_info/your-did-doc.json"
-# private_key_path = "docs/did_info/your-private-key.pem"
-# allowed_dids = ["did:wba:example.com:your-did"]
 
 [gateway.database]
 enabled = false

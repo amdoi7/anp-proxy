@@ -73,20 +73,14 @@ class DidWbaVerifierAdapter:
         )
 
     async def verify(self, headers_like: Any, domain: str) -> DidAuthResult:
-        if not self.config.enabled:
-            return DidAuthResult(success=False, error="DID-WBA disabled")
-
         headers = _normalize_headers(headers_like)
         authorization = headers.get("authorization")
         if not authorization:
             return DidAuthResult(success=False, error="Missing Authorization header")
 
         try:
-            # Use default verifier for now - the SDK should handle DID resolution
             result = await self._verifier.verify_auth_header(authorization, domain)
             did = result.get("did")
-            if self.config.allowed_dids and did not in set(self.config.allowed_dids):
-                return DidAuthResult(success=False, error="DID not allowed")
             return DidAuthResult(success=True, did=did)
 
         except DidWbaVerifierError as exc:
@@ -96,22 +90,31 @@ class DidWbaVerifierAdapter:
             return DidAuthResult(success=False, error=str(exc))
 
 
-def build_auth_headers(auth_config: AuthConfig, gateway_url: str) -> dict[str, str]:
+def build_auth_headers(
+    auth_config: AuthConfig,
+    gateway_url: str,
+    did_document_path: str | None = None,
+    private_key_path: str | None = None,
+) -> dict[str, str]:
     """Build DID-WBA Authorization headers for a given ws(s) URL.
 
     Uses agent_connect.authentication.DIDWbaAuthHeader.
     """
-    if not auth_config.enabled:
-        return {}
-    if not auth_config.did_document_path or not auth_config.private_key_path:
-        logger.warning(
+    # Use provided paths or try to get from auth_config if available
+    doc_path = did_document_path or getattr(auth_config, "did_document_path", None)
+    key_path = private_key_path or getattr(auth_config, "private_key_path", None)
+
+    if not doc_path or not key_path:
+        logger.error(
             "Missing DID document or private key path for DID-WBA client header generation"
         )
-        return {}
+        raise ValueError(
+            "DID document and private key paths are required for DID-WBA authentication"
+        )
 
     client = DIDWbaAuthHeader(
-        did_document_path=str(auth_config.did_document_path),
-        private_key_path=str(auth_config.private_key_path),
+        did_document_path=str(doc_path),
+        private_key_path=str(key_path),
     )
 
     logger.info("Getting auth header for gateway URL: %s", gateway_url)

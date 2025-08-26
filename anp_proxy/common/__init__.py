@@ -2,11 +2,7 @@
 
 from .config import ANPConfig, GatewayConfig
 from .constants import DEFAULT_CHUNK_SIZE, DEFAULT_HTTP_PORT, DEFAULT_WSS_PORT
-from .did_resolver import (
-    DIDServiceResolver,
-    cleanup_did_service_resolver,
-    get_did_service_resolver,
-)
+from .utils import get_advertised_services
 
 __all__ = [
     "ANPConfig",
@@ -14,7 +10,5 @@ __all__ = [
     "DEFAULT_CHUNK_SIZE",
     "DEFAULT_WSS_PORT",
     "DEFAULT_HTTP_PORT",
-    "DIDServiceResolver",
-    "get_did_service_resolver",
-    "cleanup_did_service_resolver",
+    "get_advertised_services",
 ]

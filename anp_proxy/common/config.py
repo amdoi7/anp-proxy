@@ -67,13 +67,9 @@ class AuthConfig(BaseModel):
     token_expiry: int = 3600  # seconds
     max_attempts: int = 3
     # DID-WBA sub-config
-    did_wba_enabled: bool = False
     did: str | None = None
-    did_document_path: Path | None = None
-    private_key_path: Path | None = None
     resolver_base_url: str | None = None
     nonce_window_seconds: int = 300
-    allowed_dids: list[str] = Field(default_factory=list)
     # JWT for DID-WBA (server-side issuance/verification)
     jwt_private_key_path: Path | None = None
     jwt_public_key_path: Path | None = None

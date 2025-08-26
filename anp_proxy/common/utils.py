@@ -8,6 +8,7 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any, TypeVar
 
+from .db_base import execute_query
 from .log_base import get_logger
 
 logger = get_logger(__name__)
@@ -78,7 +79,9 @@ def timeout_async(seconds: float) -> Callable:
             try:
                 return await asyncio.wait_for(func(*args, **kwargs), timeout=seconds)
             except TimeoutError:
-                logger.error(f"Function {func.__name__} timed out after {seconds}s")
+                logger.error(
+                    f"Function {getattr(func, '__name__', repr(func))} timed out after {seconds}s"
+                )
                 raise
 
         return wrapper
@@ -263,40 +266,36 @@ class RateLimiter:
                 del self.requests[key]
 
 
-def format_bytes(num_bytes: int) -> str:
-    """
-    Format bytes into human readable string.
+def get_advertised_services(did: str) -> list[str]:
+    """Get ordered list of proxy paths for the given DID.
 
     Args:
-        num_bytes: Number of bytes
+        did: DID identifier
 
     Returns:
-        Formatted string (e.g., "1.5 MB")
+        List of proxy_path strings
     """
-    for unit in ["B", "KB", "MB", "GB", "TB"]:
-        if num_bytes < 1024.0:
-            return f"{num_bytes:.1f} {unit}"
-        num_bytes /= 1024.0
-    return f"{num_bytes:.1f} PB"
+    try:
+        sql = "SELECT proxy_path FROM did_proxy_path WHERE did = %s ORDER BY created_at"
+        rows = execute_query(sql, (did,))
 
+        proxy_paths = []
+        for row in rows:
+            proxy_path = row["proxy_path"]
 
-def format_duration(seconds: float) -> str:
-    """
-    Format duration in seconds to human readable string.
+            # 从路径中提取服务前缀 - 去掉 /ad.json 后缀
+            if proxy_path.endswith("/ad.json"):
+                # 如果路径以 /ad.json 结尾，去掉后缀获取服务前缀
+                service_prefix = proxy_path[:-8]  # 去掉 "/ad.json" (8个字符)
+                proxy_paths.append(service_prefix)
+            else:
+                # 如果路径不以 /ad.json 结尾，直接使用
+                proxy_paths.append(proxy_path)
 
-    Args:
-        seconds: Duration in seconds
-
-    Returns:
-        Formatted string (e.g., "2m 30s")
-    """
-    if seconds < 60:
-        return f"{seconds:.1f}s"
-    elif seconds < 3600:
-        minutes = seconds // 60
-        remaining_seconds = seconds % 60
-        return f"{int(minutes)}m {int(remaining_seconds)}s"
-    else:
-        hours = seconds // 3600
-        remaining_minutes = (seconds % 3600) // 60
-        return f"{int(hours)}h {int(remaining_minutes)}m"
+        logger.info(
+            f"Loaded service prefixes from database for DID {did}: {proxy_paths}"
+        )
+        return proxy_paths
+    except Exception as e:
+        logger.error(f"Failed to query proxy paths for DID: {e}")
+        return []  # Return empty list on failure to avoid crash

@@ -79,16 +79,14 @@ def setup_logging(
     # Configure structlog processors for console output
     console_processors = [
         structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
         structlog.stdlib.add_log_level,
-        structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.TimeStamper(fmt="ISO"),
-        structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
         structlog.processors.UnicodeDecoder(),
     ]
 
-    if include_location:
+    # 只在调试模式下才包含文件名和行号
+    if include_location and level <= logging.DEBUG:
         console_processors.append(
             structlog.processors.CallsiteParameterAdder(
                 parameters=[
@@ -202,7 +200,7 @@ def setup_logging_with_config(
     # Add newline to format
     log_format = log_format + "\n"
 
-    formatter = logging.Formatter(log_format, datefmt="%Y-%m-%d %H:%M:%S")
+    formatter = logging.Formatter(log_format, datefmt="%Y-%m-%d %H:%M:%S")  # noqa: F841
     colored_formatter = ColoredFormatter(log_format, datefmt="%Y-%m-%d %H:%M:%S")
 
     # Console handler with colors
@@ -256,17 +254,8 @@ def setup_logging_with_config(
     structlog.configure(
         processors=[
             structlog.stdlib.filter_by_level,
-            structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
-            structlog.stdlib.PositionalArgumentsFormatter(),
-            structlog.processors.CallsiteParameterAdder(
-                parameters=[
-                    structlog.processors.CallsiteParameter.FILENAME,
-                    structlog.processors.CallsiteParameter.LINENO,
-                ]
-            ),
             structlog.processors.TimeStamper(fmt="ISO"),
-            structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
             structlog.processors.UnicodeDecoder(),
             structlog.processors.JSONRenderer(),

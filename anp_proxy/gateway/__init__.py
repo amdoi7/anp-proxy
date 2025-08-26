@@ -1,13 +1,11 @@
 """Gateway component for ANP Proxy - Refactored with Single Responsibility Principle."""
 
-from .connection import ConnectInfo, ConnectionManager
-from .message import MessageHandler
-from .registry import ServiceRegistryManager
-from .routing import RequestRouter
-from .server import ANPGateway, create_app, create_gateway
+from .request_mapper import RequestMapper
+from .response_handler import ResponseHandler
+from .routing import PathRouter
+from .server import ANPGateway, ConnectInfo, create_app, create_gateway
 
 
-# 向后兼容 - 为旧代码提供 GatewayServer
 class GatewayServer:
     """向后兼容的 Gateway 服务器包装器"""
 
@@ -50,8 +48,9 @@ class GatewayServer:
         # WebSocket 处理函数
         async def websocket_handler(websocket, path):
             try:
-                # 直接使用原始 websocket 处理连接
-                await self.gateway.handle_raw_websocket_connection(websocket, path)
+                # WebSocket连接必须通过认证，不再支持原始连接
+                logger.warning(f"Raw WebSocket connection rejected: {path}")
+                await websocket.close(code=4001, reason="Authentication required")
             except Exception as e:
                 logger.error(f"WebSocket handler error: {e}")
 
@@ -85,11 +84,10 @@ class GatewayServer:
 __all__ = [
     "ANPGateway",
     "ConnectInfo",
-    "ConnectionManager",
     "GatewayServer",  # 向后兼容
-    "MessageHandler",
-    "RequestRouter",
-    "ServiceRegistryManager",
+    "RequestMapper",
+    "ResponseHandler",
+    "PathRouter",
     "create_gateway",
     "create_app",
 ]

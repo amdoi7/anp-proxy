@@ -72,24 +72,6 @@ def execute_query(sql: str, params: tuple = ()) -> list[dict[str, Any]]:
             return cursor.fetchall()
 
 
-def execute_insert(sql: str, params: tuple = ()) -> int:
-    """Execute an INSERT and return affected rows."""
-    with get_db_connection() as conn:
-        with conn.cursor() as cursor:
-            result = cursor.execute(sql, params)
-            conn.commit()
-            return result
-
-
-def execute_update(sql: str, params: tuple = ()) -> int:
-    """Execute an UPDATE and return affected rows."""
-    with get_db_connection() as conn:
-        with conn.cursor() as cursor:
-            result = cursor.execute(sql, params)
-            conn.commit()
-            return result
-
-
 def execute_upsert(sql: str, params: tuple = ()) -> int:
     """Execute an INSERT ... ON DUPLICATE KEY UPDATE and return affected rows."""
     with get_db_connection() as conn:

@@ -2,16 +2,8 @@
 
 import json
 import struct
-import zlib
 from dataclasses import dataclass, field
 from enum import IntEnum
-
-try:
-    from ..common.log_base import get_logger
-except ImportError:
-    from anp_proxy.common.log_base import get_logger
-
-logger = get_logger(__name__)
 
 
 class MessageType(IntEnum):
@@ -99,13 +91,6 @@ class ANPXHeader:
 
     def encode(self) -> bytes:
         """Encode header to 24 bytes."""
-        logger.debug(
-            "🔧 [HEADER_ENCODE] Starting header encode",
-            message_type=self.message_type,
-            flags=self.flags,
-            total_length=self.total_length,
-            body_crc=f"{self.body_crc:08x}",
-        )
 
         # Encode header without CRC first
         header_data = struct.pack(
@@ -126,12 +111,6 @@ class ANPXHeader:
         crc_data = header_data[:12]
         header_crc = calculate_crc32(crc_data)
 
-        logger.debug(
-            "🔧 [HEADER_ENCODE] CRC calculation",
-            crc_data=crc_data.hex(),
-            calculated_crc=f"{header_crc:08x}",
-        )
-
         # Encode final header with calculated CRC
         final_header = struct.pack(
             "!4sBBBBIII",
@@ -150,83 +129,35 @@ class ANPXHeader:
             final_header += b"\x00" * (self.HEADER_SIZE - len(final_header))
 
         result = final_header[: self.HEADER_SIZE]
-        logger.debug(
-            "🔧 [HEADER_ENCODE] Header encode completed",
-            final_header=result.hex(),
-            header_size=len(result),
-        )
 
         return result
 
     @classmethod
     def decode(cls, data: bytes) -> "ANPXHeader":
         """Decode header from 24 bytes."""
-        logger.debug("🔍 [HEADER_DECODE] Starting header decode", data_length=len(data))
-        logger.debug("🔍 [HEADER_DECODE] Raw header data", raw_data=data[:24].hex())
-
         if len(data) < cls.HEADER_SIZE:
-            logger.error(
-                "🔍 [HEADER_DECODE] Header too short",
-                expected=cls.HEADER_SIZE,
-                actual=len(data),
-            )
             raise ValueError(
                 f"Header data must be {cls.HEADER_SIZE} bytes, got {len(data)}"
             )
 
         # Unpack the 20-byte structured data from 24-byte header (last 4 bytes are padding)
-        magic, version, msg_type, flags, reserved, total_len, header_crc, body_crc = (
+        magic, version, msg_type, flags, _, total_len, header_crc, body_crc = (
             struct.unpack("!4sBBBBIII", data[:20])
         )
 
-        logger.debug(
-            "🔍 [HEADER_DECODE] Unpacked header fields",
-            magic=magic,
-            version=version,
-            msg_type=msg_type,
-            flags=flags,
-            total_len=total_len,
-            header_crc=f"{header_crc:08x}",
-            body_crc=f"{body_crc:08x}",
-        )
-
         if magic != cls.MAGIC:
-            logger.error(
-                "🔍 [HEADER_DECODE] Invalid magic", expected=cls.MAGIC, actual=magic
-            )
             raise ValueError(f"Invalid magic: {magic}")
 
         if version != cls.VERSION:
-            logger.error(
-                "🔍 [HEADER_DECODE] Unsupported version",
-                expected=cls.VERSION,
-                actual=version,
-            )
             raise ValueError(f"Unsupported version: {version}")
 
         # Verify header CRC (first 12 bytes)
         from .crc import verify_crc32
 
         header_data_for_crc = data[:12]
-        calculated_crc = zlib.crc32(header_data_for_crc) & 0xFFFFFFFF
-
-        logger.debug(
-            "🔍 [HEADER_DECODE] CRC verification",
-            header_data=header_data_for_crc.hex(),
-            expected_crc=f"{header_crc:08x}",
-            calculated_crc=f"{calculated_crc:08x}",
-        )
 
         if not verify_crc32(header_data_for_crc, header_crc):
-            logger.error(
-                "🔍 [HEADER_DECODE] CRC validation failed",
-                expected=f"{header_crc:08x}",
-                calculated=f"{calculated_crc:08x}",
-                header_data=header_data_for_crc.hex(),
-            )
             raise ValueError("Header CRC validation failed")
-
-        logger.debug("🔍 [HEADER_DECODE] Header decode completed successfully")
 
         return cls(
             message_type=MessageType(msg_type),
