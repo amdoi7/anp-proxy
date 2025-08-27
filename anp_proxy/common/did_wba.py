@@ -16,8 +16,6 @@ from agent_connect.authentication import DIDWbaAuthHeader
 
 from ..anp_sdk.anp_auth.did_wba_verifier import (
     DidWbaVerifier as SdkDidWbaVerifier,
-)
-from ..anp_sdk.anp_auth.did_wba_verifier import (
     DidWbaVerifierConfig,
     DidWbaVerifierError,
 )
@@ -49,6 +47,7 @@ def _normalize_headers(raw_headers: Any) -> dict[str, str]:
                 pass
         return result
 
+
 class DidWbaVerifierAdapter:
     """Adapter that wraps SDK's DidWbaVerifier for gateway usage."""
 
@@ -66,15 +65,14 @@ class DidWbaVerifierAdapter:
             jwt_private = None
             jwt_public = None
 
-        self._verifier = SdkDidWbaVerifier(DidWbaVerifierConfig(
-            jwt_private_key=jwt_private,
-            jwt_public_key=jwt_public,
-        ))
+        self._verifier = SdkDidWbaVerifier(
+            DidWbaVerifierConfig(
+                jwt_private_key=jwt_private,
+                jwt_public_key=jwt_public,
+            )
+        )
 
     async def verify(self, headers_like: Any, domain: str) -> DidAuthResult:
-        if not self.config.did_wba_enabled:
-            return DidAuthResult(success=False, error="DID-WBA disabled")
-
         headers = _normalize_headers(headers_like)
         authorization = headers.get("authorization")
         if not authorization:
@@ -83,8 +81,6 @@ class DidWbaVerifierAdapter:
         try:
             result = await self._verifier.verify_auth_header(authorization, domain)
             did = result.get("did")
-            if self.config.allowed_dids and did not in set(self.config.allowed_dids):
-                return DidAuthResult(success=False, error="DID not allowed")
             return DidAuthResult(success=True, did=did)
 
         except DidWbaVerifierError as exc:
@@ -94,30 +90,43 @@ class DidWbaVerifierAdapter:
             return DidAuthResult(success=False, error=str(exc))
 
 
-def build_auth_headers(auth_config: AuthConfig, gateway_url: str) -> dict[str, str]:
+def build_auth_headers(
+    auth_config: AuthConfig,
+    gateway_url: str,
+    did_document_path: str | None = None,
+    private_key_path: str | None = None,
+) -> dict[str, str]:
     """Build DID-WBA Authorization headers for a given ws(s) URL.
 
     Uses agent_connect.authentication.DIDWbaAuthHeader.
     """
-    if not auth_config.did_wba_enabled:
-        return {}
-    if not auth_config.did_document_path or not auth_config.private_key_path:
-        logger.warning("Missing DID document or private key path for DID-WBA client header generation")
-        return {}
+    # Use provided paths or try to get from auth_config if available
+    doc_path = did_document_path or getattr(auth_config, "did_document_path", None)
+    key_path = private_key_path or getattr(auth_config, "private_key_path", None)
+
+    if not doc_path or not key_path:
+        logger.error(
+            "Missing DID document or private key path for DID-WBA client header generation"
+        )
+        raise ValueError(
+            "DID document and private key paths are required for DID-WBA authentication"
+        )
 
     client = DIDWbaAuthHeader(
-        did_document_path=str(auth_config.did_document_path),
-        private_key_path=str(auth_config.private_key_path),
+        did_document_path=str(doc_path),
+        private_key_path=str(key_path),
     )
 
     logger.info("Getting auth header for gateway URL: %s", gateway_url)
 
     headers = client.get_auth_header(gateway_url)
     # Ensure proper case for websockets extra_headers (we will pass as list of tuples)
-    normalized = {k if isinstance(k, str) else str(k): v if isinstance(v, str) else str(v) for k, v in headers.items()}
+    normalized = {
+        k if isinstance(k, str) else str(k): v if isinstance(v, str) else str(v)
+        for k, v in headers.items()
+    }
     return normalized
 
 
 # Backward-compatible export name for gateway imports
 DidWbaVerifier = DidWbaVerifierAdapter
-

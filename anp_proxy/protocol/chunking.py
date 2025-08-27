@@ -49,7 +49,9 @@ class ChunkAssembler:
             self.chunks[request_id].append(chunk)
 
             # Check if assembly is complete
-            if is_final or (chunk_tot is not None and len(self.chunks[request_id]) == chunk_tot):
+            if is_final or (
+                chunk_tot is not None and len(self.chunks[request_id]) == chunk_tot
+            ):
                 return self._assemble_chunks(request_id)
 
             return None
@@ -98,7 +100,9 @@ class ChunkAssembler:
             elif message_type == MessageType.HTTP_RESPONSE:
                 return self._assemble_response_chunks(chunks)
             else:
-                raise ANPXChunkingError(f"Cannot assemble chunks for message type {message_type}")
+                raise ANPXChunkingError(
+                    f"Cannot assemble chunks for message type {message_type}"
+                )
 
         finally:
             # Clean up chunks after assembly
@@ -193,7 +197,8 @@ class ChunkAssembler:
         """
         current_time = time.time()
         stale_requests = [
-            req_id for req_id, timestamp in self.timestamps.items()
+            req_id
+            for req_id, timestamp in self.timestamps.items()
             if current_time - timestamp > max_age_seconds
         ]
 

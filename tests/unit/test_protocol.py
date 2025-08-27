@@ -27,7 +27,7 @@ class TestANPXMessage:
             method="GET",
             path="/test",
             headers={"host": "example.com"},
-            query={"q": "test"}
+            query={"q": "test"},
         )
         message.add_tlv_field(TLVTag.HTTP_META, http_meta.to_json())
         message.add_tlv_field(TLVTag.HTTP_BODY, b"test body")
@@ -49,7 +49,7 @@ class TestANPXMessage:
         resp_meta = ResponseMeta(
             status=200,
             reason="OK",
-            headers={"content-type": "application/json"}
+            headers={"content-type": "application/json"},
         )
         message.add_tlv_field(TLVTag.RESP_META, resp_meta.to_json())
         message.add_tlv_field(TLVTag.HTTP_BODY, b'{"result": "success"}')
@@ -94,7 +94,7 @@ class TestANPXEncoder:
             headers={"host": "example.com"},
             query={"q": "value"},
             body=b"test body",
-            request_id="test-123"
+            request_id="test-123",
         )
 
         assert len(messages) == 1
@@ -120,7 +120,7 @@ class TestANPXEncoder:
             reason="OK",
             headers={"content-type": "application/json"},
             body=b'{"success": true}',
-            request_id="test-123"
+            request_id="test-123",
         )
 
         assert len(messages) == 1
@@ -148,7 +148,7 @@ class TestANPXEncoder:
             path="/upload",
             headers={"content-type": "application/octet-stream"},
             body=large_body,
-            request_id="test-large"
+            request_id="test-large",
         )
 
         # Should be chunked
@@ -193,7 +193,7 @@ class TestANPXDecoder:
             path="/test",
             headers={"host": "example.com"},
             body=b"test",
-            request_id="test-123"
+            request_id="test-123",
         )
 
         original_message = messages[0]
@@ -220,10 +220,7 @@ class TestANPXDecoder:
         # Create large request
         large_body = b"data" * 100  # 400 bytes
         chunk_messages = encoder.encode_http_request(
-            method="POST",
-            path="/upload",
-            body=large_body,
-            request_id="chunked-test"
+            method="POST", path="/upload", body=large_body, request_id="chunked-test"
         )
 
         assert len(chunk_messages) > 1
@@ -253,8 +250,11 @@ class TestHTTPMeta:
         original = HTTPMeta(
             method="POST",
             path="/api/test",
-            headers={"content-type": "application/json", "authorization": "Bearer token"},
-            query={"param1": "value1", "param2": "value2"}
+            headers={
+                "content-type": "application/json",
+                "authorization": "Bearer token",
+            },
+            query={"param1": "value1", "param2": "value2"},
         )
 
         json_str = original.to_json()
@@ -274,7 +274,10 @@ class TestResponseMeta:
         original = ResponseMeta(
             status=201,
             reason="Created",
-            headers={"content-type": "application/json", "location": "/api/resource/123"}
+            headers={
+                "content-type": "application/json",
+                "location": "/api/resource/123",
+            },
         )
 
         json_str = original.to_json()

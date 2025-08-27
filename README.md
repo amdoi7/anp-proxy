@@ -47,8 +47,11 @@ anp-proxy --mode both --local-app "myapp:app" --gateway-port 8080
 #### 2. 生产模式 - Gateway (公网部署)
 
 ```bash
-# 在公网服务器启动 Gateway
-anp-proxy --mode gateway --gateway-host 0.0.0.0 --gateway-port 80 --wss-port 443
+# 在公网服务器启动 Gateway (默认配置端口)
+anp-proxy --mode gateway --gateway-host 127.0.0.1 --gateway-port 9877 --wss-port 9878
+
+# 或使用标准端口
+anp-proxy --mode gateway --gateway-host 127.0.0.1 --gateway-port 80 --wss-port 443
 ```
 
 #### 3. 生产模式 - Receiver (私网部署)
@@ -66,12 +69,12 @@ anp-proxy --mode receiver --gateway-url "wss://your-gateway.com:443" --local-app
 mode = "both"  # gateway, receiver, both
 
 [gateway]
-host = "0.0.0.0"
-port = 8080
-wss_port = 8765
+host = "127.0.0.1"
+http_port = 9877  # HTTP 服务端口
+wss_port = 9878   # WebSocket 服务端口
 
 [receiver]
-gateway_url = "wss://localhost:8765"
+gateway_url = "wss://localhost:9878"
 local_app_module = "myapp:app"
 
 [logging]
@@ -91,12 +94,12 @@ anp-proxy --config config.toml
 ```toml
 [gateway]
 # HTTP 服务器设置
-host = "0.0.0.0"
-port = 8080
+host = "127.0.0.1"
+http_port = 9877  # HTTP 服务端口
 
 # WebSocket 服务器设置
-wss_host = "0.0.0.0"
-wss_port = 8765
+wss_host = "127.0.0.1"
+wss_port = 9878   # WebSocket 服务端口
 
 # 连接设置
 max_connections = 100
@@ -120,7 +123,7 @@ token_expiry = 3600
 ```toml
 [receiver]
 # Gateway 连接
-gateway_url = "wss://gateway.example.com:8765"
+gateway_url = "wss://gateway.example.com:9878"
 
 # 本地应用设置
 local_app_module = "myapp:app"  # ASGI 应用
@@ -150,13 +153,13 @@ from anp_proxy import ANPProxy, ANPConfig
 
 # 创建配置
 config = ANPConfig(mode="both")
-config.gateway.port = 8080
+config.gateway.http_port = 9877
 config.receiver.local_app_module = "myapp:app"
 
 # 创建并运行代理
 async def main():
     proxy = ANPProxy(config)
-    
+
     if config.mode == "gateway":
         gateway = proxy.create_gateway_server()
         await gateway.run()
@@ -169,9 +172,10 @@ asyncio.run(main())
 
 ### 集成到现有应用
 
+**注意：Receiver 功能已迁移到独立的 octopus 项目中。**
+
 ```python
 from fastapi import FastAPI
-from anp_proxy import ReceiverClient, ReceiverConfig
 
 app = FastAPI()
 
@@ -179,9 +183,7 @@ app = FastAPI()
 async def root():
     return {"message": "Hello World"}
 
-# 创建 ANP Receiver
-config = ReceiverConfig(gateway_url="wss://gateway.example.com:8765")
-receiver = ReceiverClient(config, app)
+# 如需使用 Receiver 功能，请参考 octopus 项目的文档和示例
 
 # 启动 receiver (在后台任务中)
 import asyncio
@@ -205,10 +207,10 @@ ANP Proxy 使用自定义的 ANPX 二进制协议，支持：
 
 ```bash
 # 检查 Gateway 状态
-curl http://localhost:8080/health
+curl http://localhost:9877/health
 
 # 获取统计信息
-curl http://localhost:8080/stats
+curl http://localhost:9877/stats
 ```
 
 ### 日志配置
@@ -247,7 +249,7 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY . .
-EXPOSE 8080 8765
+EXPOSE 9877 9878
 
 CMD ["anp-proxy", "--config", "config.toml"]
 ```

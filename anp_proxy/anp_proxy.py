@@ -1,50 +1,33 @@
-"""ANP Proxy library entry point."""
+"""
+Deprecated compatibility shim. CLI moved to `anp_proxy.cli`.
+This file remains temporarily to avoid breaking existing imports and docs
+that refer to `anp_proxy.anp_proxy:main` or `python -m anp_proxy.anp_proxy`.
+"""
 
-from .common.config import ANPConfig
-from .common.log_base import get_logger, setup_logging
-from .gateway import GatewayServer
-from .receiver import ReceiverClient
-
-logger = get_logger(__name__)
-
-
-class ANPProxy:
-    """ANP Proxy library interface."""
-
-    def __init__(self, config: ANPConfig) -> None:
-        """
-        Initialize ANP Proxy.
-
-        Args:
-            config: ANP configuration
-        """
-        self.config = config
-
-        # Setup logging
-        setup_logging(config.logging)
-
-        logger.info("ANP Proxy library initialized", mode=config.mode)
-
-    def create_gateway_server(self) -> GatewayServer:
-        """Create Gateway server instance."""
-        return GatewayServer(self.config.gateway)
-
-    def create_receiver_client(self, app=None) -> ReceiverClient:
-        """Create Receiver client instance."""
-        return ReceiverClient(self.config.receiver, app)
+import importlib
+from warnings import warn
 
 
-# For backwards compatibility
-def main():
-    """Main entry point - delegates to CLI script."""
-    import sys
-    from pathlib import Path
+def __getattr__(name: str):
+    if name == "main":
+        warn(
+            "anp_proxy.anp_proxy is deprecated; use `python -m anp_proxy` or the"
+            " installed console script `anp-proxy`. For direct imports, use"
+            " `anp_proxy.cli:main`.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        module = importlib.import_module(".cli", __package__)
+        return getattr(module, "main")  # type: ignore[attr-defined]
+    raise AttributeError(f"module {__name__} has no attribute {name}")
 
-    # Add the parent directory to path so we can import the CLI script
-    sys.path.insert(0, str(Path(__file__).parent.parent))
 
-    from anp_proxy import main as cli_main
-    cli_main()
-
-
-__all__ = ["ANPProxy", "ANPConfig", "GatewayServer", "ReceiverClient"]
+if __name__ == "__main__":
+    warn(
+        "Running as `python -m anp_proxy.anp_proxy` is deprecated; use"
+        " `python -m anp_proxy` or the console script `anp-proxy`.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    module = importlib.import_module(".cli", __package__)
+    getattr(module, "main")()  # type: ignore[attr-defined]

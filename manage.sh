@@ -1,157 +1,7 @@
-### 一、要解决的核心问题
-
-| 编号 | 痛点描述                                           | 影响                                  |
-|------|----------------------------------------------------|---------------------------------------|
-| P1   | **局域网 Agent 无公网接口**，难以被外部调用        | 能力无法对外暴露，阻碍生态互联        |
-| P2   | **HTTP ↔ 内部服务** 协议不统一，部署受限于框架     | 每换一套框架就要重写代理逻辑          |
-| P3   | **NAT / 防火墙穿透复杂**                           | 传统端口映射或 VPN 方案成本高、不稳定 |
-| P4   | **安全与多路复用**：明文 WebSocket、不限流、无鉴权 | 容易被劫持或拖垮服务                  |
-
----
-
-### 二、总体目标
-
-1. **框架无关**：前后端可用任何语言 / 框架，只需遵守统一消息格式。
-2. **全量转发**：完整封装 HTTP 方法、路径、Headers、Query、Body 与响应信息。
-3. **安全可靠**：WSS（TLS）+ 双向鉴权 + 请求 ID 配对 + 断线重连。
-4. **高性能异步**：纯异步 IO、单连接多并发、无磁盘落地。
-
----
-
-### 三、架构概览
-
-```text
-┌────────────┐            WSS (TLS)           ┌──────────────┐
-│  Client    │ ─HTTP→ ┌──────────────┐ ─────→ │  Receiver &  │
-│  外部调用者  │        │Gateway/Proxy │        │  Internal App│
-└────────────┘ ←HTTP─ └──────────────┘ ←───── │  (FastAPI …) │
-                 ↑                ↓           └──────────────┘
-           Request 包装       Response 包装
-```
-
-- **Gateway/Proxy（公网）**
-  - 监听所有 HTTP 请求
-  - 打包后通过 **WSS** 发送给后端
-  - 收到响应包后还原成 HTTP 返回给 Client
-
-- **Receiver（内网）**
-  - 维持 WSS 长连接，接收打包请求
-  - 还原并**内部调用**本地 Web 框架（示例：`httpx.AsyncClient(app=fastapi_app)`）
-  - 将框架返回内容打包为响应，通过 WSS 返还
-
----
-
-### 四、消息格式
-
-使用二进制详细，详细见相关文档。
-
-[消息格式](./proxy-protocol.md)
-
----
-
-### 五、关键流程
-
-| 步骤 | 参与方             | 说明                                                      |
-|------|--------------------|-----------------------------------------------------------|
-| 1    | Gateway            | 收到外部 HTTP 请求 → 解析五元组 → 生成 `request_id`       |
-| 2    | Gateway → Receiver | 通过 WSS 发送 **Request 包**                              |
-| 3    | Receiver           | 解包 → 用 `httpx.AsyncClient(app=local_app)` 伪造内部请求 |
-| 4    | Internal App       | 正常执行业务逻辑，返回 ASGI Response                      |
-| 5    | Receiver           | 打包为 **Response 包**（带同一 `request_id`）             |
-| 6    | Receiver → Gateway | WSS 发送 Response 包                                      |
-| 7    | Gateway            | 还原 HTTP 响应 → 回给外部 Client                          |
-
-#### 时序图（文本示意）
-
-```text
-Client            Gateway/Proxy          Receiver             Internal App
-                    （公网）             （内网）
- |                     |                    |                      |
- |---1. HTTP Request-->|                    |                      |
- |                     |---2. WSS Request-->|                      |
- |                     |                    |---3. ASGI Call------>|
- |                     |                    |<--4. ASGI Response---|
- |                     |<--5. WSS Response--|                      |
- |<--6. HTTP Response--|                    |                      |
-```
-
-```mermaid
-sequenceDiagram
-participant C as Client
-participant G as Gateway/Proxy (公网)
-participant R as Receiver (内网)
-participant A as Internal App
-
-
-C->>G: 1. HTTP Request
-G->>R: 2. WSS 发送 Request 包
-R->>A: 3. 内部 ASGI 调用
-A-->>R: 4. ASGI Response
-R-->>G: 5. WSS 发送 Response 包
-G-->>C: 6. HTTP Response
-```
-
-### 六、技术选型与实现要点、技术选型与实现要点、技术选型与实现要点
-
-| 组件     | 建议库                                | 备注                              |
-|----------|---------------------------------------|-----------------------------------|
-| WSS 通道 | `websockets` / `starlette.websockets` | 支持 TLS、Ping/Pong、断线自动重连 |
-| 请求封装 | `pydantic` / `dataclasses-json`       | 统一 Schema，易扩展               |
-| 内部调用 | `httpx.AsyncClient(app=app)`          | 0 复制 ASGI 路径，高性能          |
-| 流控限速 | `asyncio.Semaphore`                   | 防止单连接拖垮后端                |
-
-### 七、快速开始
-
-#### 安装和运行
-
-```bash
-# 克隆项目
-git clone <repository-url>
-cd anp-proxy
-
-# 安装依赖
-uv sync
-
-# 运行服务
-uv run python -m anp_proxy --mode both --gateway-port 8089 --wss-port 8789
-```
-
-#### 配置选项
-
-- `--mode`: 运行模式 (gateway/receiver/both)
-- `--gateway-port`: Gateway HTTP 端口
-- `--wss-port`: WebSocket 端口
-- `--config`: 配置文件路径
-
-#### 配置文件示例
-
-```toml
-mode = "both"
-debug = false
-
-[gateway]
-host = "127.0.0.1"
-port = 8089
-wss_host = "127.0.0.1"
-wss_port = 8789
-
-[logging]
-level = "INFO"
-```
-
-#### 📌 结语
-
-通过 **“HTTP ↔ WebSocket ↔ ASGI”** 的桥接模式，你可以：
-
-- **无侵入**地为局域网 Agent 打开安全、可控的公网入口；
-- 保留原有框架生态，做到真正的框架无关；
-- 统一请求/响应协议后，未来可平滑接入 **多语言 Agent** 与 **多云部署**。
-
-如果需要更深入的代码示例或把它做成可发布的开源库，告诉我即可！
 #!/bin/bash
 
-# UV Python Service 管理脚本
-# 用于启动、停止、重启、查看状态
+# ANP Proxy 管理脚本（基于 UV）
+# 用于启动、停止、重启、查看状态（针对本项目 anp-proxy 定制）
 
 # 颜色定义
 RED='\033[0;31m'
@@ -162,16 +12,18 @@ BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # 默认配置
-DEFAULT_SERVICE_NAME="python-service"
-DEFAULT_PYTHON_FILE="main.py"
+DEFAULT_SERVICE_NAME="anp-proxy"
 DEFAULT_VENV_PATH=".venv"
+DEFAULT_LOG_FILE="logs/anp-proxy.log"
 
 # 全局变量
 SERVICE_NAME=""
-PYTHON_FILE=""
 VENV_PATH=""
 PROJECT_DIR="$(pwd)"
 PID_FILE=""
+ENTRY_CMD=""
+ENTRY_ARGS=""
+PID_MATCH=""
 
 # 打印带颜色的消息
 print_info() {
@@ -198,24 +50,23 @@ init_config() {
     fi
     SERVICE_NAME=${SERVICE_NAME:-$DEFAULT_SERVICE_NAME}
 
-    # 查找 Python 入口文件
-    if [ -f "main.py" ]; then
-        PYTHON_FILE="main.py"
-    elif [ -f "app.py" ]; then
-        PYTHON_FILE="app.py"
-    elif [ -f "run.py" ]; then
-        PYTHON_FILE="run.py"
-    elif [ -f "src/main.py" ]; then
-        PYTHON_FILE="src/main.py"
+    # 入口命令（本项目通过 CLI 启动）
+    ENTRY_CMD="uv run anp-proxy"
+    if [ -f "config.toml" ]; then
+        ENTRY_ARGS="--config config.toml"
     else
-        PYTHON_FILE=$DEFAULT_PYTHON_FILE
+        ENTRY_ARGS=""
     fi
+
+    # PID 匹配关键字（用于查找运行中进程）
+    PID_MATCH="anp-proxy"
 
     # 虚拟环境路径
     VENV_PATH=$DEFAULT_VENV_PATH
 
     # PID 文件路径
     PID_FILE="$PROJECT_DIR/.${SERVICE_NAME}.pid"
+    LOG_FILE="$DEFAULT_LOG_FILE"
 }
 
 # 检查命令是否存在
@@ -237,14 +88,13 @@ check_uv() {
 check_project() {
     if [ ! -f "pyproject.toml" ]; then
         print_warning "未检测到 pyproject.toml 文件"
-        print_info "请确保在 uv 项目目录中运行此脚本"
+        print_info "请确保在 anp-proxy 项目目录中运行此脚本"
         return 1
     fi
 
-    if [ ! -f "$PYTHON_FILE" ]; then
-        print_error "未找到 Python 入口文件: $PYTHON_FILE"
-        print_info "请检查文件路径或修改脚本配置"
-        return 1
+    # 非强制要求 config.toml，但若存在则提示
+    if [ -f "config.toml" ]; then
+        print_info "检测到配置文件: config.toml"
     fi
 
     return 0
@@ -264,8 +114,31 @@ get_service_pid() {
         fi
     fi
 
-    # 通过进程名查找
-    pgrep -f "uv run.*$PYTHON_FILE" | head -1
+    # 优先查找通过 screen 或 tmux 启动的进程
+    local pid=""
+
+    # 查找 screen 会话中的进程
+    if command_exists screen && screen -list | grep -q "$SERVICE_NAME"; then
+        # 通过 screen 会话名查找相关进程
+        pid=$(pgrep -f "screen -dmS $SERVICE_NAME.*$ENTRY_CMD" | head -1)
+        if [ -n "$pid" ]; then
+            echo "$pid"
+            return 0
+        fi
+    fi
+
+    # 查找 tmux 会话中的进程
+    if command_exists tmux && tmux has-session -t "$SERVICE_NAME" 2>/dev/null; then
+        # 通过 tmux 会话名查找相关进程
+        pid=$(pgrep -f "tmux.*$SERVICE_NAME.*$ENTRY_CMD" | head -1)
+        if [ -n "$pid" ]; then
+            echo "$pid"
+            return 0
+        fi
+    fi
+
+    # 通过进程名查找（匹配 anp-proxy 或 python -m anp_proxy）
+    pgrep -af "uv run .*${PID_MATCH}|python -m anp_proxy|anp_proxy.cli:main|anp-proxy" | awk 'NR==1{print $1}'
 }
 
 # 启动服务
@@ -287,13 +160,16 @@ start_service() {
     fi
 
     # 创建日志目录
-    mkdir -p logs
+    mkdir -p "$(dirname "$LOG_FILE")"
 
     # 启动服务（后台运行）
     print_info "在后台启动服务..."
 
-    # 使用 nohup 和 uv run 启动服务
-    nohup uv run "$PYTHON_FILE" > "logs/service.log" 2>&1 &
+    # 使用 nohup 启动服务
+    # 统一环境：UTF-8 与禁用 ANSI 颜色，避免日志出现乱码与 \x1B 序列
+    # 使用 setsid 确保进程在独立的会话中运行
+    LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 PYTHONIOENCODING=UTF-8 NO_COLOR=1 ANP_NO_COLOR=1 \
+    setsid nohup $ENTRY_CMD $ENTRY_ARGS > "$LOG_FILE" 2>&1 < /dev/null &
     local service_pid=$!
 
     # 保存 PID
@@ -305,15 +181,15 @@ start_service() {
     # 验证服务是否成功启动
     if kill -0 "$service_pid" 2>/dev/null; then
         print_success "服务已启动 (PID: $service_pid)"
-        print_info "日志文件: logs/service.log"
+        print_info "日志文件: $LOG_FILE"
     else
         print_error "服务启动失败"
         rm -f "$PID_FILE"
 
         # 显示错误日志
-        if [ -f "logs/service.log" ]; then
+        if [ -f "$LOG_FILE" ]; then
             print_info "错误日志:"
-            tail -n 10 "logs/service.log"
+            tail -n 50 "$LOG_FILE"
         fi
         return 1
     fi
@@ -395,13 +271,13 @@ show_status() {
 
     echo -e "\n项目信息:"
     echo "  项目目录: $PROJECT_DIR"
-    echo "  入口文件: $PYTHON_FILE"
+    echo "  启动命令: $ENTRY_CMD $ENTRY_ARGS"
     echo "  PID 文件: $PID_FILE"
 
     # 显示日志文件大小
-    if [ -f "logs/service.log" ]; then
-        local log_size=$(du -h "logs/service.log" | cut -f1)
-        echo "  日志文件: logs/service.log ($log_size)"
+    if [ -f "$LOG_FILE" ]; then
+        local log_size=$(du -h "$LOG_FILE" | cut -f1)
+        echo "  日志文件: $LOG_FILE ($log_size)"
     fi
 
     # 显示 uv 信息
@@ -414,9 +290,9 @@ show_status() {
 
 # 显示日志
 show_logs() {
-    if [ -f "logs/service.log" ]; then
+    if [ -f "$LOG_FILE" ]; then
         print_info "显示最近的日志 (按 Ctrl+C 退出):"
-        tail -f "logs/service.log"
+        tail -f "$LOG_FILE"
     else
         print_warning "日志文件不存在"
     fi
@@ -424,7 +300,7 @@ show_logs() {
 
 # 显示帮助
 show_help() {
-    echo "UV Python Service 管理脚本"
+    echo "ANP Proxy 管理脚本"
     echo ""
     echo "用法: $0 [命令]"
     echo ""
@@ -436,8 +312,8 @@ show_help() {
     echo "  logs     - 查看日志"
     echo "  help     - 显示帮助"
     echo ""
-    echo "配置文件: 会自动从 pyproject.toml 读取项目信息"
-    echo "入口文件: 自动检测 main.py, app.py, run.py 或 src/main.py"
+    echo "配置: 优先使用项目根目录下的 config.toml (如存在)"
+    echo "入口: 通过 CLI 启动 -> uv run anp-proxy [--config config.toml]"
 }
 
 # 交互式菜单
@@ -451,7 +327,7 @@ show_menu() {
     # 显示当前状态
     echo -e "${YELLOW}当前状态：${NC}"
     echo -e "  项目名称: ${GREEN}$SERVICE_NAME${NC}"
-    echo -e "  入口文件: ${GREEN}$PYTHON_FILE${NC}"
+    echo -e "  启动命令: ${GREEN}$ENTRY_CMD $ENTRY_ARGS${NC}"
 
     local pid=$(get_service_pid)
     if [ -n "$pid" ]; then
@@ -514,8 +390,8 @@ handle_menu_choice() {
         5)
             echo ""
             print_info "显示日志 (按 q 退出):"
-            if [ -f "logs/service.log" ]; then
-                less +F "logs/service.log"
+            if [ -f "$LOG_FILE" ]; then
+                less +F "$LOG_FILE"
             else
                 print_warning "日志文件不存在"
                 echo -n "按回车键继续..."

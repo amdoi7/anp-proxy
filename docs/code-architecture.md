@@ -10,17 +10,18 @@
 ```
 anp-proxy/
 ├── anp_proxy/                    # 主代码包
-│   ├── __init__.py
-│   ├── gateway/                  # Gateway 组件（公网侧）
-│   ├── receiver/                 # Receiver 组件（内网侧）
-│   ├── protocol/                 # ANPX 协议 SDK（可独立封装）
-│   ├── common/                   # 公共工具和配置
-│   └── examples/                 # 使用示例
-├── tests/                        # 测试代码
-├── docs/                         # 文档
-├── pyproject.toml               # UV 配置文件
+│   ├── __init__.py              # 包初始化
+│   ├── anp_proxy.py             # 主程序入口（CLI + 应用逻辑）
+│   ├── gateway/                 # Gateway 组件（公网侧）
+│   ├── receiver/                # Receiver 组件（内网侧）
+│   ├── protocol/                # ANPX 协议 SDK（可独立封装）
+│   ├── common/                  # 公共工具和配置
+│   └── examples/                # 使用示例
+├── tests/                       # 测试代码
+├── docs/                        # 文档
+├── config.toml                  # 配置文件
+├── pyproject.toml              # UV 配置文件
 └── README.md
-├── anp_proxy.py             # 主入口文件
 ```
 
 ## 核心模块设计
@@ -116,14 +117,14 @@ Local App → Receiver → Protocol Encoder → WSS → Protocol Decoder → Gat
 
 ## 技术选型
 
-| 组件 | 技术选择 | 理由 |
-|------|----------|------|
-| HTTP 服务 | FastAPI + Uvicorn | 高性能异步、自动文档 |
-| WSS 客户端/服务端 | `websockets` | 纯异步、支持 TLS |
-| 序列化 | `pydantic` | 类型安全、易扩展 |
-| 本地调用 | `httpx.AsyncClient` | 零拷贝 ASGI 调用 |
-| 日志 | `structlog` | 结构化日志、调试友好 |
-| 配置管理 | `pydantic-settings` | 环境变量 + 配置文件 |
+| 组件              | 技术选择            | 理由                 |
+|-------------------|---------------------|----------------------|
+| HTTP 服务         | FastAPI + Uvicorn   | 高性能异步、自动文档 |
+| WSS 客户端/服务端 | `websockets`        | 纯异步、支持 TLS     |
+| 序列化            | `pydantic`          | 类型安全、易扩展     |
+| 本地调用          | `httpx.AsyncClient` | 零拷贝 ASGI 调用     |
+| 日志              | `structlog`         | 结构化日志、调试友好 |
+| 配置管理          | `pydantic-settings` | 环境变量 + 配置文件  |
 
 ## 部署模式
 
@@ -135,11 +136,10 @@ server.run()
 ```
 
 ### Receiver 模式（内网部署）
-```python
-from anp_proxy.receiver import ReceiverClient
-client = ReceiverClient(config, local_app)
-client.connect_and_serve()
-```
+
+**注意：Receiver 功能已迁移到独立的 octopus 项目中。**
+
+如需使用 Receiver 功能，请参考 octopus 项目的文档和示例。
 
 ### 一体化模式（开发/测试）
 ```python
@@ -172,7 +172,7 @@ proxy.run_both()  # 同时启动 Gateway 和 Receiver
 
 ## 架构优势
 
-**✅ 框架无关**：Protocol 层完全独立，Gateway/Receiver 可适配任意框架  
-**✅ 全量转发**：完整封装 HTTP 五元组，支持分片传输  
-**✅ 安全可靠**：WSS + 双向认证 + CRC 校验 + 断线重连  
+**✅ 框架无关**：Protocol 层完全独立，Gateway/Receiver 可适配任意框架
+**✅ 全量转发**：完整封装 HTTP 五元组，支持分片传输
+**✅ 安全可靠**：WSS + 双向认证 + CRC 校验 + 断线重连
 **✅ 高性能异步**：纯异步架构，单连接多并发，无磁盘落地

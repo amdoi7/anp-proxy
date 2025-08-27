@@ -16,11 +16,9 @@ async def test_gateway_only():
     config = GatewayConfig(
         host="127.0.0.1",
         port=9080,
-        wss_host="127.0.0.1",
-        wss_port=9765,
         auth=AuthConfig(enabled=False),
         max_connections=10,
-        timeout=30.0
+        timeout=30.0,
     )
 
     gateway = GatewayServer(config)
@@ -40,7 +38,7 @@ async def test_gateway_only():
             async with httpx.AsyncClient(
                 timeout=10.0,
                 proxy=None,  # No proxy
-                trust_env=False  # Don't trust environment proxy settings
+                trust_env=False,  # Don't trust environment proxy settings
             ) as client:
                 response = await client.get("http://127.0.0.1:9080/health")
                 print(f"✅ Health check - Status: {response.status_code}")
@@ -58,7 +56,7 @@ async def test_gateway_only():
             async with httpx.AsyncClient(
                 timeout=5.0,  # Short timeout
                 proxy=None,
-                trust_env=False
+                trust_env=False,
             ) as client:
                 response = await client.get("http://127.0.0.1:9080/")
                 print(f"🤔 Unexpected success - Status: {response.status_code}")

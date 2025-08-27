@@ -1,0 +1,54 @@
+# ANP Proxy Configuration
+
+# Operating mode: "gateway" only
+mode = "gateway"
+
+# Enable debug mode
+debug = false
+
+[logging]
+level = "INFO"
+format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+[gateway]
+# HTTP server settings
+host = "0.0.0.0"
+port = 9877
+
+# WebSocket server settings
+wss_host = "0.0.0.0"
+wss_port = 9878
+
+# Connection limits
+max_connections = 100
+timeout = 30.0
+keepalive_timeout = 60.0
+
+# Protocol settings
+chunk_size = 65536   # 64KB
+ping_interval = 10.0
+
+[gateway.tls]
+enabled = false
+verify_mode = "required"
+
+[gateway.auth]
+enabled = true
+token_expiry = 3600  # 1 hour
+max_attempts = 3
+did_wba_enabled = true
+did_document_path = "docs/did_info/did-wba-didhost.cc-test-public-did-doc.json"
+private_key_path = "docs/did_info/did-wba-didhost.cc-test-public-private-key.pem"
+allowed_dids = ["did:wba:didhost.cc:test:public"]
+
+[gateway.database]
+enabled = true
+host = "agentinfra.cgzu4q6aej87.us-east-1.rds.amazonaws.com"
+port = 3306
+user = "admin"
+password = "NewDb-30487620"
+database = "did_db"
+charset = "utf8mb4"
+connect_timeout = 5.0
+min_connections = 2
+max_connections = 20
