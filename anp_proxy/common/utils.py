@@ -9,9 +9,7 @@ from functools import wraps
 from typing import Any, TypeVar
 
 from .db_base import execute_query
-from .log_base import get_logger
-
-logger = get_logger(__name__)
+from .log_base import logger
 
 T = TypeVar("T")
 
@@ -79,9 +77,8 @@ def timeout_async(seconds: float) -> Callable:
             try:
                 return await asyncio.wait_for(func(*args, **kwargs), timeout=seconds)
             except TimeoutError:
-                logger.error(
-                    f"Function {getattr(func, '__name__', repr(func))} timed out after {seconds}s"
-                )
+                func_name = func.__name__ if hasattr(func, "__name__") else str(func)
+                logger.error(f"Function {func_name} timed out after {seconds}s")
                 raise
 
         return wrapper

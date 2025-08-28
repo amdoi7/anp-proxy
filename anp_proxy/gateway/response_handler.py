@@ -10,14 +10,12 @@ from typing import Any
 from fastapi import WebSocket
 from starlette.responses import JSONResponse, Response
 
-from ..common.log_base import get_logger
+from ..common.log_base import logger
 from ..protocol import (
     ANPXMessage,
     MessageType as ANPXMessageType,
     TLVTag,
 )
-
-logger = get_logger(__name__)
 
 
 class MessageType(Enum):
@@ -396,7 +394,8 @@ class ResponseHandler:
                 if expired_ids:
                     logger.info(f"Cleaned up {len(expired_ids)} expired responses")
 
-                await asyncio.sleep(5.0)  # 每5秒清理一次
+                # HARDCODED: 5秒清理间隔 - 高吞吐量环境应该配置化
+                await asyncio.sleep(5.0)
 
             except Exception as e:
                 logger.error(f"Cleanup error: {e}")

@@ -26,7 +26,7 @@ class TLVTag(IntEnum):
     FINAL_CHUNK = 0x0C
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class TLVField:
     """Represents a single TLV field."""
 
@@ -63,7 +63,7 @@ class TLVField:
         return cls(TLVTag(tag), value), offset + 5 + length
 
 
-@dataclass
+@dataclass(slots=True)
 class ANPXHeader:
     """ANPX Protocol Fixed Header (24 bytes)."""
 
@@ -141,9 +141,16 @@ class ANPXHeader:
             )
 
         # Unpack the 20-byte structured data from 24-byte header (last 4 bytes are padding)
-        magic, version, msg_type, flags, _, total_len, header_crc, body_crc = (
-            struct.unpack("!4sBBBBIII", data[:20])
-        )
+        (
+            magic,
+            version,
+            msg_type,
+            flags,
+            _,
+            total_len,
+            header_crc,
+            body_crc,
+        ) = struct.unpack("!4sBBBBIII", data[:20])
 
         if magic != cls.MAGIC:
             raise ValueError(f"Invalid magic: {magic}")
@@ -235,6 +242,14 @@ class ANPXMessage:
     def __post_init__(self) -> None:
         """Update header total_length after initialization."""
         self._update_total_length()
+
+    @property
+    def total_length(self) -> int:
+        """Get the total length of the message (header + body)."""
+        body_size = sum(
+            5 + tlv_field.length for tlv_field in self.tlv_fields
+        )  # Tag(1) + Len(4) + Value
+        return ANPXHeader.HEADER_SIZE + body_size
 
     def _update_total_length(self) -> None:
         """Update header total_length based on current TLV fields."""
@@ -330,6 +345,5 @@ class ANPXMessage:
         self.header.body_crc = calculate_crc32(body)
         self._update_total_length()
 
-        # Encode header and combine
-        header_bytes = self.header.encode()
-        return header_bytes + body
+        # Encode header and body
+        return self.header.encode() + body

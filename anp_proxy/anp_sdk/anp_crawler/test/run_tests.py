@@ -14,7 +14,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
 from test_anp_crawler import TestANPCrawler, TestANPDocumentParser, TestANPInterface
 
-from anp_proxy.common.log_base import setup_enhanced_logging
+from anp_proxy.common.log_base import setup_logging
 
 
 def main():
@@ -26,7 +26,7 @@ def main():
     print()
 
     # Setup logging
-    setup_enhanced_logging(level="INFO")
+    setup_logging(level="INFO")
 
     try:
         # Create test loader

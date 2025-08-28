@@ -8,7 +8,7 @@ from typing import Any
 
 from starlette.requests import Request
 
-from ..common.log_base import get_logger
+from ..common.log_base import logger
 from ..protocol import (
     ANPXEncoder,
     ANPXHeader,
@@ -16,8 +16,6 @@ from ..protocol import (
     MessageType as ANPXMessageType,
     TLVTag,
 )
-
-logger = get_logger(__name__)
 
 
 class MessageType(Enum):

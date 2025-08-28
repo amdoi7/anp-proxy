@@ -10,8 +10,6 @@ dependencies = [
     "httpx",
     "pydantic",
     "pydantic-settings",
-    "structlog",
-    "click",
     "uvloop; sys_platform != 'win32'",
     "PyJWT",
     "rtoml",
@@ -20,6 +18,7 @@ dependencies = [
     "agent-connect",
     "PyMySQL",
     "python-dotenv",
+    "loguru>=0.7.3",
 ]
 readme = "README.md"
 requires-python = ">= 3.11"
@@ -77,3 +76,15 @@ dev = [
     "pre-commit>=4.3.0",
     "vulture>=2.14",
 ]
+
+[tool.uv]
+# Configure uv run anp-proxy to work directly
+dev-dependencies = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff",
+]
+
+[tool.uv.sources]
+# Enable direct execution with uv run anp-proxy
+anp-proxy = { workspace = true }

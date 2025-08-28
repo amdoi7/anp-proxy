@@ -3,6 +3,8 @@ Database operations module (simple helpers).
 """
 
 import contextlib
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import pymysql
@@ -17,9 +19,7 @@ from ..config import (
     DB_PORT,
     DB_USER,
 )
-from .log_base import get_logger
-
-logger = get_logger(__name__)
+from .log_base import logger
 
 
 class DatabaseError(Exception):
@@ -43,7 +43,15 @@ def get_connection():
             autocommit=False,
         )
     except Exception as e:
-        logger.error("Database connection failed", error=str(e))
+        # 使用结构化日志
+        logger.error(
+            "Database connection failed",
+            host=DB_HOST,
+            port=DB_PORT,
+            database=DB_NAME,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
         raise DatabaseError(f"Database connection failed: {e}")
 
 
@@ -57,7 +65,40 @@ def get_db_connection():
     except Exception as e:
         if conn:
             conn.rollback()
-        logger.error("Database operation failed", error=str(e))
+        # 使用结构化日志
+        logger.error(
+            "Database operation failed",
+            error=str(e),
+            error_type=type(e).__name__,
+            operation="sync_db_connection",
+        )
+        raise DatabaseError(f"Database operation failed: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+@asynccontextmanager
+async def get_async_db_connection() -> AsyncGenerator[Any, None]:
+    """Async context manager for database connection with automatic cleanup.
+
+    Note: This is a wrapper around synchronous pymysql for now.
+    In production, consider using aiomysql for true async operations.
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        yield conn
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        # 使用结构化日志
+        logger.error(
+            "Async database operation failed",
+            error=str(e),
+            error_type=type(e).__name__,
+            operation="async_db_connection",
+        )
         raise DatabaseError(f"Database operation failed: {e}")
     finally:
         if conn:
@@ -95,7 +136,15 @@ def test_connection() -> bool:
                     logger.error("Database connection test failed")
                     return False
     except Exception as e:
-        logger.error("Database connection test failed", error=str(e))
+        # 使用结构化日志
+        logger.error(
+            "Database connection test failed",
+            host=DB_HOST,
+            port=DB_PORT,
+            database=DB_NAME,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
         return False
 
 

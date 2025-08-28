@@ -1,112 +1,24 @@
 """
-网关核心 - 集成连接管理，提供统一接口
+ANP网关服务器 - 核心网关功能
 """
 
 import asyncio
 import time
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any
 
 from fastapi import FastAPI, Request, WebSocket
-from starlette.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse
 
 from ..anp_sdk.anp_auth.did_wba_verifier import DidWbaVerifier, DidWbaVerifierConfig
-from ..common.log_base import get_logger
+from ..common.log_base import logger
 from ..common.utils import get_advertised_services
+from .connection import ConnectInfo, ConnectionState
 from .middleware import create_default_middleware_stack
 from .request_mapper import RequestMapper
 from .response_handler import ResponseHandler
 from .routing import PathRouter
 from .websocket_handler import WebSocketHandler
-
-logger = get_logger(__name__)
-
-
-class ConnectionState(Enum):
-    """连接状态"""
-
-    CONNECTING = "connecting"
-    CONNECTED = "connected"
-    AUTHENTICATED = "authenticated"
-    DISCONNECTED = "disconnected"
-
-
-@dataclass
-class ConnectInfo:
-    """连接信息"""
-
-    connection_id: str
-    websocket: WebSocket | None = None
-    state: ConnectionState = ConnectionState.CONNECTING
-    authenticated: bool = False
-    did: str | None = None
-    path: str | None = None
-    created_at: float = field(default_factory=time.time)
-    last_activity: float = field(default_factory=time.time)
-    last_websocket_activity: float = field(
-        default_factory=time.time
-    )  # 区分WebSocket活动
-    _cleaning_up: bool = False  # 添加清理状态标志
-    _websocket_closed: bool = False  # 添加WebSocket关闭状态标志
-
-    @property
-    def is_healthy(self) -> bool:
-        """连接是否健康"""
-        from ..common.log_base import get_logger
-
-        logger = get_logger(__name__)
-
-        if self.state != ConnectionState.AUTHENTICATED:
-            logger.info(
-                f"Connection {self.connection_id} not healthy: state={self.state.value}"
-            )
-            return False
-
-        if self.websocket is None:
-            logger.info(
-                f"Connection {self.connection_id} not healthy: websocket is None"
-            )
-            return False
-
-        logger.info(f"Connection {self.connection_id} is healthy (simplified check)")
-        return True
-
-    def update_activity(self) -> None:
-        """更新活动时间（通用）"""
-        self.last_activity = time.time()
-
-    def update_websocket_activity(self) -> None:
-        """更新WebSocket活动时间（只有WebSocket消息才调用）"""
-        current_time = time.time()
-        self.last_activity = current_time
-        self.last_websocket_activity = current_time
-
-    def update_ping(self) -> None:
-        """更新心跳时间"""
-        self.update_websocket_activity()
-
-    def start_cleanup(self) -> bool:
-        """开始清理，返回是否成功获取清理锁"""
-        if self._cleaning_up:
-            return False
-        self._cleaning_up = True
-        return True
-
-    @property
-    def is_cleaning_up(self) -> bool:
-        """是否正在清理"""
-        return self._cleaning_up
-
-    def mark_websocket_closed(self) -> None:
-        """标记WebSocket已关闭"""
-        self._websocket_closed = True
-
-    @property
-    def is_websocket_closed(self) -> bool:
-        """WebSocket是否已关闭"""
-        return self._websocket_closed
 
 
 class ANPGateway:
@@ -253,8 +165,13 @@ class ANPGateway:
             return connection
 
         except Exception as e:
+            # 使用结构化日志
             logger.error(
-                f"Service registration error: {e}", connection_id=connection_id
+                "Service registration error",
+                connection_id=connection_id,
+                did=did,
+                error=str(e),
+                error_type=type(e).__name__,
             )
             return None
 
@@ -444,7 +361,7 @@ class ANPGateway:
 
     # === HTTP请求处理方法 ===
 
-    async def handle_http_request(self, request: Request) -> Response:
+    async def handle_http_request(self, request: Request) -> JSONResponse:
         """处理HTTP请求"""
         if not self._running:
             return JSONResponse({"error": "Gateway not running"}, status_code=503)

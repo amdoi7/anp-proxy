@@ -1,9 +1,10 @@
-"""Gateway component for ANP Proxy - Refactored with Single Responsibility Principle."""
+"""
+ANP Gateway - 统一网关接口
+"""
 
-from .request_mapper import RequestMapper
-from .response_handler import ResponseHandler
+from .connection import ConnectInfo
 from .routing import PathRouter
-from .server import ANPGateway, ConnectInfo, create_app, create_gateway
+from .server import ANPGateway, create_app, create_gateway
 
 
 class GatewayServer:
@@ -30,9 +31,7 @@ class GatewayServer:
         import uvicorn
 
         from anp_proxy.common.config import get_default_bind_host
-        from anp_proxy.common.log_base import get_logger
-
-        logger = get_logger(__name__)
+        from anp_proxy.common.log_base import logger
 
         # 从配置中获取服务器参数
         http_host = getattr(self.config, "host", get_default_bind_host())

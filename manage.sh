@@ -14,13 +14,15 @@ NC='\033[0m' # No Color
 # 默认配置
 DEFAULT_SERVICE_NAME="anp-proxy"
 DEFAULT_VENV_PATH=".venv"
-DEFAULT_LOG_FILE="logs/anp-proxy.log"
+# 使用与Python应用相同的日志文件格式
+DEFAULT_LOG_DIR="logs"
 
 # 全局变量
 SERVICE_NAME=""
 VENV_PATH=""
 PROJECT_DIR="$(pwd)"
 PID_FILE=""
+LOG_FILE=""
 ENTRY_CMD=""
 ENTRY_ARGS=""
 PID_MATCH=""
@@ -46,17 +48,13 @@ print_warning() {
 init_config() {
     # 从 pyproject.toml 获取项目名称
     if [ -f "pyproject.toml" ]; then
-        SERVICE_NAME=$(grep -E '^name\s*=' pyproject.toml | sed 's/name\s*=\s*["\x27]\([^"\x27]*\)["\x27]/\1/' | head -1)
+        SERVICE_NAME=$(grep -E '^name\s*=' pyproject.toml | sed -E 's/^name\s*=\s*["\x27]([^"\x27]*)["\x27].*/\1/' | head -1)
     fi
     SERVICE_NAME=${SERVICE_NAME:-$DEFAULT_SERVICE_NAME}
 
     # 入口命令（本项目通过 CLI 启动）
     ENTRY_CMD="uv run anp-proxy"
-    if [ -f "config.toml" ]; then
-        ENTRY_ARGS="--config config.toml"
-    else
-        ENTRY_ARGS=""
-    fi
+    ENTRY_ARGS=""
 
     # PID 匹配关键字（用于查找运行中进程）
     PID_MATCH="anp-proxy"
@@ -66,7 +64,12 @@ init_config() {
 
     # PID 文件路径
     PID_FILE="$PROJECT_DIR/.${SERVICE_NAME}.pid"
-    LOG_FILE="$DEFAULT_LOG_FILE"
+
+    # 日志目录路径（与Python应用保持一致）
+    LOG_DIR="$DEFAULT_LOG_DIR"
+    # Python应用会自己处理日志文件命名
+    LOG_FILE="$LOG_DIR/anp_proxy_$(date +%Y%m%d).log"
+
 }
 
 # 检查命令是否存在
@@ -92,8 +95,12 @@ check_project() {
         return 1
     fi
 
-    # 非强制要求 config.toml，但若存在则提示
-    if [ -f "config.toml" ]; then
+    # 检查 config.toml 配置文件
+    if [ ! -f "config.toml" ]; then
+        print_error "config.toml 配置文件不存在！"
+        print_info "ANP Proxy 需要 config.toml 配置文件才能运行"
+        return 1
+    else
         print_info "检测到配置文件: config.toml"
     fi
 
@@ -114,36 +121,13 @@ get_service_pid() {
         fi
     fi
 
-    # 优先查找通过 screen 或 tmux 启动的进程
-    local pid=""
-
-    # 查找 screen 会话中的进程
-    if command_exists screen && screen -list | grep -q "$SERVICE_NAME"; then
-        # 通过 screen 会话名查找相关进程
-        pid=$(pgrep -f "screen -dmS $SERVICE_NAME.*$ENTRY_CMD" | head -1)
-        if [ -n "$pid" ]; then
-            echo "$pid"
-            return 0
-        fi
-    fi
-
-    # 查找 tmux 会话中的进程
-    if command_exists tmux && tmux has-session -t "$SERVICE_NAME" 2>/dev/null; then
-        # 通过 tmux 会话名查找相关进程
-        pid=$(pgrep -f "tmux.*$SERVICE_NAME.*$ENTRY_CMD" | head -1)
-        if [ -n "$pid" ]; then
-            echo "$pid"
-            return 0
-        fi
-    fi
-
-    # 通过进程名查找（匹配 anp-proxy 或 python -m anp_proxy）
-    pgrep -af "uv run .*${PID_MATCH}|python -m anp_proxy|anp_proxy.cli:main|anp-proxy" | awk 'NR==1{print $1}'
+    # 通过进程名查找
+    pgrep -f "uv run.*anp-proxy" | head -1
 }
 
 # 启动服务
 start_service() {
-    print_info "启动 $SERVICE_NAME 服务..."
+    print_info "启动 ANP Proxy..."
 
     # 检查是否已运行
     local pid=$(get_service_pid)
@@ -152,24 +136,29 @@ start_service() {
         return 0
     fi
 
-    # 确保项目依赖已安装
-    print_info "检查项目依赖..."
-    if ! uv sync; then
-        print_error "依赖安装失败"
+    # 检查项目依赖（静默）
+    if ! uv sync --quiet 2>/dev/null; then
+        print_warning "依赖可能需要更新，正在同步..."
+        uv sync
+    fi
+
+    # 创建日志目录并检查权限
+    if ! mkdir -p "$LOG_DIR" 2>/dev/null; then
+        print_error "无法创建日志目录: $LOG_DIR"
         return 1
     fi
 
-    # 创建日志目录
-    mkdir -p "$(dirname "$LOG_FILE")"
+    if [ ! -w "$LOG_DIR" ]; then
+        print_error "日志目录无写权限: $LOG_DIR"
+        return 1
+    fi
 
     # 启动服务（后台运行）
     print_info "在后台启动服务..."
+    print_info "日志将输出到: $LOG_FILE"
 
-    # 使用 nohup 启动服务
-    # 统一环境：UTF-8 与禁用 ANSI 颜色，避免日志出现乱码与 \x1B 序列
-    # 使用 setsid 确保进程在独立的会话中运行
-    LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 PYTHONIOENCODING=UTF-8 NO_COLOR=1 ANP_NO_COLOR=1 \
-    setsid nohup $ENTRY_CMD $ENTRY_ARGS > "$LOG_FILE" 2>&1 < /dev/null &
+    # 后台启动服务 - 让应用自己处理日志，只捕获启动错误
+    nohup $ENTRY_CMD $ENTRY_ARGS >/dev/null 2>&1 &
     local service_pid=$!
 
     # 保存 PID
@@ -180,16 +169,18 @@ start_service() {
 
     # 验证服务是否成功启动
     if kill -0 "$service_pid" 2>/dev/null; then
-        print_success "服务已启动 (PID: $service_pid)"
-        print_info "日志文件: $LOG_FILE"
+        print_success "ANP Proxy 已启动 (PID: $service_pid)"
     else
         print_error "服务启动失败"
         rm -f "$PID_FILE"
 
-        # 显示错误日志
+        # 显示最近的错误日志
         if [ -f "$LOG_FILE" ]; then
-            print_info "错误日志:"
-            tail -n 50 "$LOG_FILE"
+            print_info "最近的日志:"
+            tail -n 10 "$LOG_FILE"
+        else
+            print_warning "日志文件不存在: $LOG_FILE"
+            print_info "请检查应用是否正常启动及日志配置"
         fi
         return 1
     fi
@@ -197,7 +188,7 @@ start_service() {
 
 # 停止服务
 stop_service() {
-    print_info "停止 $SERVICE_NAME 服务..."
+    print_info "停止 ANP Proxy..."
 
     local pid=$(get_service_pid)
     if [ -z "$pid" ]; then
@@ -226,7 +217,7 @@ stop_service() {
 
         # 清理 PID 文件
         rm -f "$PID_FILE"
-        print_success "服务已停止"
+        print_success "ANP Proxy 已停止"
     else
         print_error "停止服务失败"
         return 1
@@ -235,7 +226,7 @@ stop_service() {
 
 # 重启服务
 restart_service() {
-    print_info "重启 $SERVICE_NAME 服务..."
+    print_info "重启 ANP Proxy..."
     stop_service
     sleep 1
     start_service
@@ -243,49 +234,40 @@ restart_service() {
 
 # 显示状态
 show_status() {
-    echo -e "\n${BLUE}=== $SERVICE_NAME 服务状态 ===${NC}"
+    echo -e "\n${BLUE}=== ANP Proxy 状态 ===${NC}"
 
     local pid=$(get_service_pid)
     if [ -n "$pid" ]; then
-        echo -e "服务状态: ${GREEN}运行中${NC}"
-        echo "进程 PID: $pid"
+        echo -e "状态: ${GREEN}运行中${NC} (PID: $pid)"
 
-        # 显示进程信息
+        # 显示运行时间和内存
         if command_exists ps; then
-            local proc_info=$(ps -p "$pid" -o pid,ppid,etime,rss --no-headers 2>/dev/null)
-            if [ -n "$proc_info" ]; then
-                echo "进程信息: $proc_info"
-            fi
-        fi
-
-        # 显示内存使用
-        if command_exists ps; then
-            local mem_usage=$(ps -p "$pid" -o rss --no-headers 2>/dev/null)
-            if [ -n "$mem_usage" ]; then
-                echo "内存使用: $((mem_usage/1024)) MB"
+            local info=$(ps -p "$pid" -o etime,rss --no-headers 2>/dev/null)
+            if [ -n "$info" ]; then
+                local etime=$(echo $info | awk '{print $1}')
+                local mem=$(echo $info | awk '{print $2}')
+                echo "运行时间: $etime"
+                echo "内存使用: $((mem/1024)) MB"
             fi
         fi
     else
-        echo -e "服务状态: ${RED}未运行${NC}"
+        echo -e "状态: ${RED}停止${NC}"
     fi
 
-    echo -e "\n项目信息:"
-    echo "  项目目录: $PROJECT_DIR"
-    echo "  启动命令: $ENTRY_CMD $ENTRY_ARGS"
-    echo "  PID 文件: $PID_FILE"
+    echo "启动命令: $ENTRY_CMD"
 
-    # 显示日志文件大小
+    # 显示日志信息
     if [ -f "$LOG_FILE" ]; then
         local log_size=$(du -h "$LOG_FILE" | cut -f1)
-        echo "  日志文件: $LOG_FILE ($log_size)"
+        echo "今日日志: $LOG_FILE ($log_size)"
+    elif [ -d "$LOG_DIR" ]; then
+        local log_count=$(find "$LOG_DIR" -name "anp_proxy_*.log" -type f 2>/dev/null | wc -l)
+        echo "日志目录: $LOG_DIR (共 $log_count 个日志文件)"
+    else
+        echo "日志目录: $LOG_DIR (不存在)"
     fi
 
-    # 显示 uv 信息
-    if command_exists uv; then
-        echo "  uv 版本: $(uv --version 2>/dev/null | head -1)"
-    fi
-
-    echo -e "\n${BLUE}========================${NC}"
+    echo -e "${BLUE}==================${NC}"
 }
 
 # 显示日志
@@ -294,7 +276,21 @@ show_logs() {
         print_info "显示最近的日志 (按 Ctrl+C 退出):"
         tail -f "$LOG_FILE"
     else
-        print_warning "日志文件不存在"
+        print_warning "今日日志文件不存在: $LOG_FILE"
+        print_info "正在查找其他日志文件..."
+
+        # 查找日志目录中的最新日志文件
+        if [ -d "$LOG_DIR" ]; then
+            local latest_log=$(find "$LOG_DIR" -name "anp_proxy_*.log" -type f -exec ls -t {} + 2>/dev/null | head -1)
+            if [ -n "$latest_log" ]; then
+                print_info "找到最新日志: $latest_log"
+                tail -f "$latest_log"
+            else
+                print_warning "未找到任何日志文件"
+            fi
+        else
+            print_warning "日志目录不存在: $LOG_DIR"
+        fi
     fi
 }
 
@@ -302,60 +298,35 @@ show_logs() {
 show_help() {
     echo "ANP Proxy 管理脚本"
     echo ""
-    echo "用法: $0 [命令]"
+    echo "用法: $0 [start|stop|restart|status|logs]"
     echo ""
-    echo "命令:"
-    echo "  start    - 启动服务"
-    echo "  stop     - 停止服务"
-    echo "  restart  - 重启服务"
-    echo "  status   - 查看状态"
-    echo "  logs     - 查看日志"
-    echo "  help     - 显示帮助"
+    echo "  start    启动服务"
+    echo "  stop     停止服务"
+    echo "  restart  重启服务"
+    echo "  status   查看状态"
+    echo "  logs     查看日志"
     echo ""
-    echo "配置: 优先使用项目根目录下的 config.toml (如存在)"
-    echo "入口: 通过 CLI 启动 -> uv run anp-proxy [--config config.toml]"
+    echo "无参数运行显示交互菜单"
 }
 
 # 交互式菜单
 show_menu() {
     clear
-    echo -e "${BOLD}============================${NC}"
-    echo -e "${BOLD}  UV Python Service 管理工具  ${NC}"
-    echo -e "${BOLD}============================${NC}"
+    echo -e "${BOLD}=== ANP Proxy 管理工具 ===${NC}"
     echo ""
-
-    # 显示当前状态
-    echo -e "${YELLOW}当前状态：${NC}"
-    echo -e "  项目名称: ${GREEN}$SERVICE_NAME${NC}"
-    echo -e "  启动命令: ${GREEN}$ENTRY_CMD $ENTRY_ARGS${NC}"
 
     local pid=$(get_service_pid)
     if [ -n "$pid" ]; then
-        echo -e "  运行状态: ${GREEN}运行中${NC} (PID: $pid)"
-
-        # 显示内存使用
-        if command_exists ps; then
-            local mem_usage=$(ps -p "$pid" -o rss --no-headers 2>/dev/null)
-            if [ -n "$mem_usage" ]; then
-                echo -e "  内存使用: ${GREEN}$((mem_usage/1024)) MB${NC}"
-            fi
-        fi
+        echo -e "状态: ${GREEN}运行中${NC} (PID: $pid)"
     else
-        echo -e "  运行状态: ${RED}未运行${NC}"
+        echo -e "状态: ${RED}停止${NC}"
     fi
 
     echo ""
-    echo -e "${BOLD}----------------------------${NC}"
-    echo -e "${YELLOW}请选择操作：${NC}"
+    echo "1) 查看状态    2) 启动服务    3) 停止服务"
+    echo "4) 重启服务    5) 查看日志    0) 退出"
     echo ""
-    echo "  1) 查看状态"
-    echo "  2) 启动服务"
-    echo "  3) 停止服务"
-    echo "  4) 重启服务"
-    echo "  5) 查看日志"
-    echo "  6) 退出"
-    echo ""
-    echo -n "请输入选项 [1-6]: "
+    echo -n "选择 [0-5]: "
 }
 
 # 处理菜单选择
@@ -398,7 +369,7 @@ handle_menu_choice() {
                 read
             fi
             ;;
-        6)
+        0)
             echo "退出管理工具"
             exit 0
             ;;

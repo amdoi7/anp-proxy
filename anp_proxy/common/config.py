@@ -75,22 +75,29 @@ class AuthConfig(BaseModel):
 
 
 class LogConfig(BaseModel):
-    """Logging configuration."""
+    """Logging configuration - simplified for log_base."""
 
     level: str = "INFO"
-    format: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-    file: Path | None = None
-    max_size: str = "10MB"
-    backup_count: int = 5
+    log_dir: str | None = None  # None uses default path
+    environment: str = "development"  # development/production
 
     @field_validator("level")
     @classmethod
     def validate_level(cls, v: str) -> str:
-        """Validate log level."""
-        valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        """Validate log level - only INFO and DEBUG."""
+        valid_levels = ["DEBUG", "INFO"]
         if v.upper() not in valid_levels:
             raise ValueError(f"level must be one of: {valid_levels}")
         return v.upper()
+
+    @field_validator("environment")
+    @classmethod
+    def validate_environment(cls, v: str) -> str:
+        """Validate environment mode."""
+        valid_environments = ["development", "production"]
+        if v.lower() not in valid_environments:
+            raise ValueError(f"environment must be one of: {valid_environments}")
+        return v.lower()
 
 
 class GatewayConfig(BaseModel):
@@ -121,11 +128,8 @@ class GatewayConfig(BaseModel):
     service_cache_ttl: int = 300  # Service discovery cache TTL in seconds
 
 
-class ANPConfig(BaseModel):
+class ANPProxyConfig(BaseModel):
     """Main ANP Proxy configuration."""
-
-    # Mode: "gateway" only
-    mode: str = "gateway"
 
     # Component configurations
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
@@ -134,16 +138,8 @@ class ANPConfig(BaseModel):
     logging: LogConfig = Field(default_factory=LogConfig)
     debug: bool = False
 
-    @field_validator("mode")
     @classmethod
-    def validate_mode(cls, v: str) -> str:
-        """Validate mode value."""
-        if v not in ["gateway"]:
-            raise ValueError("mode must be: gateway")
-        return v
-
-    @classmethod
-    def from_file(cls, config_file: Path) -> "ANPConfig":
+    def from_file(cls, config_file: Path) -> "ANPProxyConfig":
         """Load configuration from TOML file."""
         import rtoml
 
@@ -153,7 +149,7 @@ class ANPConfig(BaseModel):
         return cls(**config_data)
 
     @classmethod
-    def from_dict(cls, config_dict: dict[str, Any]) -> "ANPConfig":
+    def from_dict(cls, config_dict: dict[str, Any]) -> "ANPProxyConfig":
         """Load configuration from dictionary."""
         return cls(**config_dict)
 

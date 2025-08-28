@@ -8,16 +8,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from urllib.parse import urlparse
 
-from ..common.log_base import get_logger
-
-if TYPE_CHECKING:
-    # 避免循环导入，ConnectInfo现在在server.py中
-    from .server import ConnectInfo
-
-logger = get_logger(__name__)
+from ..common.log_base import logger
+from .connection import ConnectInfo
 
 
 @dataclass
@@ -321,40 +316,3 @@ class PathRouter:
             return 1 + max(depth(child) for child in node.children.values())
 
         return depth(self.root)
-
-    # 为向后兼容添加的方法别名
-    def add_path_route(self, path: str, conn_info: ConnectInfo) -> None:
-        """添加路径路由 - 兼容接口"""
-        self.add_route(path, conn_info)
-
-    def remove_path_route(self, path: str) -> bool:
-        """移除路径路由 - 兼容接口"""
-        return self.remove_route(path)
-
-    def route_request(self, request_path: str) -> ConnectInfo | None:
-        """路由请求 - 兼容接口"""
-        conn_info = self.find_route(request_path)
-        logger.debug(
-            "Request routed",
-            request_path=request_path,
-            target_connection=conn_info.connection_id if conn_info else None,
-            connection_healthy=conn_info.is_healthy if conn_info else None,
-        )
-        return conn_info
-
-    def list_all_routes(self) -> list[tuple[str, str]]:
-        """列出所有路由 - 兼容接口"""
-        routes = self.list_routes()
-        return [(path, conn.connection_id) for path, conn in routes]
-
-    def list_all_connections(self) -> list[tuple[str, ConnectInfo]]:
-        """列出所有路由连接对象 - 兼容接口"""
-        return self.list_routes()
-
-    def get_healthy_connections(self) -> list[tuple[str, ConnectInfo]]:
-        """获取所有健康的路由连接 - 兼容接口"""
-        return self.get_healthy_routes()
-
-    def get_routing_stats(self) -> dict[str, Any]:
-        """获取路由统计 - 兼容接口"""
-        return self.get_stats()

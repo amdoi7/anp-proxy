@@ -10,7 +10,22 @@ Agent Network Proxy (ANP) - 高性能 HTTP over WebSocket 隧道，用于私有�
 - 🔧 **框架无关** - 支持任意 ASGI 应用 (FastAPI, Django, Flask 等)
 - 🔄 **自动重连** - 断线自动重连，指数退避策略
 - 📊 **监控友好** - 详细的日志和统计信息
-- ⚙️ **易于配置** - TOML 配置文件 + 命令行参数
+- ⚙️ **易于配置** - TOML 配置文件，无需命令行参数
+- 🛠️ **模块化设计** - 清晰的模块边界，避免循环依赖
+
+## 最近更新 (2025-08-28)
+
+### 🔧 问题修复
+
+- **修复 total_length 字段赋值错误** - 解决了 `ANPXHeader` 不可变字段导致的协议编码问题
+- **解决循环导入问题** - 重构了 `ConnectInfo` 模块，消除了 `server.py` 和 `routing.py` 之间的循环依赖
+- **优化代码结构** - 创建独立的 `connection.py` 模块，提高代码可维护性
+
+### 📦 架构改进
+
+- 模块职责更加清晰，遵循单一职责原则
+- 导入关系更加合理，避免循环依赖
+- 遵循 KISS 原则，保持代码简洁
 
 ## 架构概览
 
@@ -28,63 +43,73 @@ Agent Network Proxy (ANP) - 高性能 HTTP over WebSocket 隧道，用于私有�
 ### 安装
 
 ```bash
-# 使用 UV 安装 (推荐)
-uv add anp-proxy
+# 克隆项目
+git clone <repository-url>
+cd anp-proxy
 
-# 或使用 pip
-pip install anp-proxy
+# 安装依赖
+uv sync
 ```
 
 ### 基本使用
 
-#### 1. 开发模式 (Gateway + Receiver 一体)
+#### 启动服务
 
 ```bash
-# 启动一体化代理，服务本地 FastAPI 应用
-anp-proxy --mode both --local-app "myapp:app" --gateway-port 8080
+# 方式1：直接使用 uv
+uv run anp-proxy
+
+# 方式2：使用管理脚本
+./manage.sh start
+
+# 方式3：使用管理脚本的交互式菜单
+./manage.sh
 ```
 
-#### 2. 生产模式 - Gateway (公网部署)
+服务将自动：
+
+- 以 `gateway` 模式运行
+- 监听 `0.0.0.0:9877` 端口
+- 从 `config.toml` 文件加载所有配置
+
+#### 管理服务
 
 ```bash
-# 在公网服务器启动 Gateway (默认配置端口)
-anp-proxy --mode gateway --gateway-host 127.0.0.1 --gateway-port 9877 --wss-port 9878
+# 查看状态
+./manage.sh status
 
-# 或使用标准端口
-anp-proxy --mode gateway --gateway-host 127.0.0.1 --gateway-port 80 --wss-port 443
-```
+# 停止服务
+./manage.sh stop
 
-#### 3. 生产模式 - Receiver (私网部署)
+# 重启服务
+./manage.sh restart
 
-```bash
-# 在私网启动 Receiver，连接到公网 Gateway
-anp-proxy --mode receiver --gateway-url "wss://your-gateway.com:443" --local-app "myapp:app"
+# 查看日志
+./manage.sh logs
 ```
 
 ### 配置文件
 
-创建 `config.toml`:
+项目根目录下的 `config.toml` 文件包含所有配置：
 
 ```toml
-mode = "both"  # gateway, receiver, both
-
-[gateway]
-host = "127.0.0.1"
-http_port = 9877  # HTTP 服务端口
-wss_port = 9878   # WebSocket 服务端口
-
-[receiver]
-gateway_url = "wss://localhost:9878"
-local_app_module = "myapp:app"
+# Enable debug mode
+debug = false
 
 [logging]
-level = "INFO"
-```
+level = "INFO"  # INFO or DEBUG only
+environment = "development"  # development or production
+# log_dir is optional, defaults to anp_proxy/logs
 
-使用配置文件：
+[gateway]
+# HTTP 服务器设置
+host = "0.0.0.0"
+port = 9877
 
-```bash
-anp-proxy --config config.toml
+# 连接限制
+max_connections = 100
+timeout = 120.0
+keepalive_timeout = 60.0
 ```
 
 ## 详细配置
@@ -94,100 +119,101 @@ anp-proxy --config config.toml
 ```toml
 [gateway]
 # HTTP 服务器设置
-host = "127.0.0.1"
-http_port = 9877  # HTTP 服务端口
-
-# WebSocket 服务器设置
-wss_host = "127.0.0.1"
-wss_port = 9878   # WebSocket 服务端口
+host = "0.0.0.0"  # 监听地址
+port = 9877       # HTTP 服务端口
 
 # 连接设置
-max_connections = 100
-timeout = 30.0
-chunk_size = 65536  # 64KB
+max_connections = 100      # 最大连接数
+timeout = 120.0           # 连接超时时间
+keepalive_timeout = 60.0  # 保活超时时间
 
-[gateway.tls]
-enabled = true
-cert_file = "server.crt"
-key_file = "server.key"
-verify_mode = "required"
+# 协议设置
+chunk_size = 65536        # 分片大小 (64KB)
+ping_interval = 10.0      # Ping 间隔
 
-[gateway.auth]
-enabled = true
-shared_secret = "your-secret-key"
-token_expiry = 3600
+# 智能路由配置
+enable_smart_routing = true
+service_cache_ttl = 300   # 服务发现缓存 TTL
 ```
 
-### Receiver 配置
+### TLS 配置
 
 ```toml
-[receiver]
-# Gateway 连接
-gateway_url = "wss://gateway.example.com:9878"
-
-# 本地应用设置
-local_app_module = "myapp:app"  # ASGI 应用
-
-# 重连设置
-reconnect_enabled = true
-reconnect_delay = 5.0
-max_reconnect_attempts = 10
-
-[receiver.tls]
+[gateway.tls]
 enabled = true
-ca_file = "ca.crt"
-verify_mode = "required"
-
-[receiver.auth]
-enabled = true
-shared_secret = "your-secret-key"
+cert_file = "server.crt"      # 证书文件路径
+key_file = "server.key"       # 私钥文件路径
+ca_file = "ca.crt"           # CA 证书文件路径
+verify_mode = "required"     # 验证模式：none, optional, required
 ```
 
-## Python API
+### 认证配置
 
-### 编程方式使用
+```toml
+[gateway.auth]
+enabled = true
+shared_secret = "your-secret-key"  # 共享密钥
+token_expiry = 3600                # Token 过期时间
 
-```python
-import asyncio
-from anp_proxy import ANPProxy, ANPConfig
+# DID-WBA 配置
+did = "did:example:123"
+resolver_base_url = "https://resolver.example.com"
+nonce_window_seconds = 300
 
-# 创建配置
-config = ANPConfig(mode="both")
-config.gateway.http_port = 9877
-config.receiver.local_app_module = "myapp:app"
-
-# 创建并运行代理
-async def main():
-    proxy = ANPProxy(config)
-
-    if config.mode == "gateway":
-        gateway = proxy.create_gateway_server()
-        await gateway.run()
-    elif config.mode == "receiver":
-        receiver = proxy.create_receiver_client()
-        await receiver.run()
-
-asyncio.run(main())
+# JWT 配置
+jwt_private_key_path = "private.pem"
+jwt_public_key_path = "public.pem"
 ```
 
-### 集成到现有应用
+### 数据库配置
 
-**注意：Receiver 功能已迁移到独立的 octopus 项目中。**
+```toml
+[gateway.database]
+enabled = true
+host = "localhost"
+port = 3306
+user = "anp_user"
+password = ""
+database = "anp_proxy"
+charset = "utf8mb4"
+connect_timeout = 10.0
+min_connections = 2
+max_connections = 20
+```
 
-```python
-from fastapi import FastAPI
+## 开发指南
 
-app = FastAPI()
+### 项目结构
 
-@app.get("/")
-async def root():
-    return {"message": "Hello World"}
+```
+anp-proxy/
+├── anp_proxy/              # 主代码目录
+│   ├── anp_sdk/           # ANP SDK
+│   ├── common/            # 公共工具和配置
+│   ├── gateway/           # Gateway 服务
+│   ├── protocol/          # ANPX 协议实现
+│   ├── app.py            # 应用入口
+│   └── cli.py            # CLI 入口
+├── config.toml            # 配置文件
+├── manage.sh              # 管理脚本
+├── pyproject.toml         # 项目配置
+└── docs/                  # 文档目录
+```
 
-# 如需使用 Receiver 功能，请参考 octopus 项目的文档和示例
+### 开发模式
 
-# 启动 receiver (在后台任务中)
-import asyncio
-asyncio.create_task(receiver.run())
+```bash
+# 安装开发依赖
+uv sync --group dev
+
+# 运行测试
+uv run pytest
+
+# 代码格式化
+uv run ruff format
+
+# 代码检查
+uv run ruff check
 ```
 
 ## ANPX 协议
@@ -200,113 +226,3 @@ ANP Proxy 使用自定义的 ANPX 二进制协议，支持：
 - **端到端校验** - CRC-32 双层校验保证数据完整性
 
 详细协议规范请参考 [docs/proxy-protocol.md](docs/proxy-protocol.md)
-
-## 监控和运维
-
-### 健康检查
-
-```bash
-# 检查 Gateway 状态
-curl http://localhost:9877/health
-
-# 获取统计信息
-curl http://localhost:9877/stats
-```
-
-### 日志配置
-
-```toml
-[logging]
-level = "INFO"  # DEBUG, INFO, WARNING, ERROR
-format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-file = "anp-proxy.log"
-max_size = "10MB"
-backup_count = 5
-```
-
-### 性能调优
-
-```toml
-[gateway]
-chunk_size = 131072  # 128KB，适合大文件传输
-max_connections = 1000  # 最大连接数
-timeout = 60.0  # 超时时间
-
-[receiver]
-chunk_size = 131072
-reconnect_delay = 2.0  # 重连延迟
-```
-
-## 部署示例
-
-### Docker 部署
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-
-COPY . .
-EXPOSE 9877 9878
-
-CMD ["anp-proxy", "--config", "config.toml"]
-```
-
-### Systemd 服务
-
-```ini
-[Unit]
-Description=ANP Proxy Gateway
-After=network.target
-
-[Service]
-Type=exec
-User=anp-proxy
-WorkingDirectory=/opt/anp-proxy
-ExecStart=/opt/anp-proxy/venv/bin/anp-proxy --config config.toml
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-## 故障排除
-
-### 常见问题
-
-1. **连接失败**
-   - 检查防火墙设置
-   - 验证 WebSocket URL 是否正确
-   - 确认 TLS 证书配置
-
-2. **认证失败**
-   - 检查 shared_secret 是否一致
-   - 验证时间同步 (重要)
-
-3. **性能问题**
-   - 调整 chunk_size
-   - 增加 max_connections
-   - 检查网络延迟
-
-### 调试模式
-
-```bash
-anp-proxy --debug --log-level DEBUG
-```
-
-## 许可证
-
-MIT License - 详见 [LICENSE](LICENSE) 文件
-
-## 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-## 支持
-
-- 📖 [文档](docs/)
-- 🐛 [Issue Tracker](https://github.com/your-org/anp-proxy/issues)
-- 💬 [讨论区](https://github.com/your-org/anp-proxy/discussions)

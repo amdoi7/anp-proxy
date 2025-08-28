@@ -1,418 +1,182 @@
-"""Logging configuration and utilities."""
+"""
+简洁高效的日志系统 - 基于 Loguru 最佳实践
+遵循 KISS 原则，提供结构化日志和性能监控
+"""
 
-import logging
-import logging.handlers
-import os
 import sys
+import time
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+from functools import wraps
+from pathlib import Path
 
-import structlog
-
-from .config import LogConfig
-
-# Global initialization state
-_logging_initialized = False
-_default_log_level = logging.INFO
+from loguru import logger
 
 
-class ColoredFormatter(logging.Formatter):
-    """Custom colored formatter for console output."""
+class LogConfig:
+    """日志配置中心"""
 
-    COLORS = {
-        "DEBUG": "\033[94m",  # Blue
-        "INFO": "\033[92m",  # Green
-        "WARNING": "\033[93m",  # Yellow
-        "ERROR": "\033[91m",  # Red
-        "CRITICAL": "\033[95m",  # Magenta
-        "RESET": "\033[0m",  # Reset
-    }
+    TIMEZONE = timezone(timedelta(hours=8))  # 东八区
+    VALID_LEVELS = {"TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"}
 
-    def format(self, record):
-        levelname = record.levelname
-        message = super().format(record)
-        color = self.COLORS.get(levelname, self.COLORS["RESET"])
-        return color + message + self.COLORS["RESET"]
+    @staticmethod
+    def _format_extra(record):
+        """提取公共的 extra 字段格式化逻辑"""
+        if not record["extra"]:
+            return ""
+        return " | ".join(f"{k}={v}" for k, v in record["extra"].items())
+
+    @staticmethod
+    def console_formatter(record):
+        """控制台日志格式 - 彩色输出，简洁明了"""
+        # 基础格式：时间 | 级别 | 模块:函数:行号 | 消息
+        base = (
+            "<green>{time:HH:mm:ss} [CST]</green> | "
+            "<level>{level: <8}</level> | "
+            "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
+            "<level>{message}</level>"
+        )
+
+        # 如果有额外字段，添加到末尾
+        extra_str = LogConfig._format_extra(record)
+        if extra_str:
+            base += f" | <dim>{extra_str}</dim>"
+
+        return base + "\n"
+
+    @staticmethod
+    def file_formatter(record):
+        """文件日志格式 - 结构化，便于解析"""
+        # 基础格式：时间 | 级别 | 模块:函数:行号 | 消息
+        base = (
+            "{time:HH:mm:ss} [CST] | {level: <8} | {name}:{function}:{line} | {message}"
+        )
+
+        # 如果有额外字段，添加到末尾
+        extra_str = LogConfig._format_extra(record)
+        if extra_str:
+            base += f" | {extra_str}"
+
+        return base + "\n"
 
 
 def setup_logging(
-    level: int = logging.INFO,
-    log_file: str | None = None,
-    include_location: bool = True,
-    enable_console_colors: bool = True,
-    force_reconfigure: bool = False,
+    level: str = "INFO", log_dir: str | None = None, environment: str = "development"
 ) -> None:
-    """
-    Configure structured logging for ANP Proxy.
-
-    Args:
-        level: The logging level
-        log_file: The log file path, default is None (auto-generated)
-        include_location: Whether to include filename and line number
-        enable_console_colors: Whether to enable colored console output
-        force_reconfigure: Whether to force reconfiguration even if already configured
-    """
-    # Configure standard library logging
-    root_logger = logging.getLogger()
-
-    # Check if already configured
-    if not force_reconfigure and root_logger.handlers:
-        # Already configured, just update level if needed
-        root_logger.setLevel(level)
-        return
-
-    root_logger.setLevel(level)
-
-    # Remove existing handlers only if force_reconfigure is True
-    if force_reconfigure:
-        for handler in root_logger.handlers[:]:
-            root_logger.removeHandler(handler)
-
-    # Get log file path
-    if log_file is None:
-        # Get the project root (anp-proxy/ directory)
-        project_root = os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        )
-        log_dir = os.path.join(project_root, "logs")
-        os.makedirs(log_dir, exist_ok=True)
-        log_file = os.path.join(log_dir, "anp_proxy.log")
-
-    # Configure structlog processors for console output
-    console_processors = [
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="ISO"),
-        structlog.processors.format_exc_info,
-        structlog.processors.UnicodeDecoder(),
-    ]
-
-    # 只在调试模式下才包含文件名和行号
-    if include_location and level <= logging.DEBUG:
-        console_processors.append(
-            structlog.processors.CallsiteParameterAdder(
-                parameters=[
-                    structlog.processors.CallsiteParameter.FILENAME,
-                    structlog.processors.CallsiteParameter.LINENO,
-                ]
-            )
+    """配置 Loguru 日志系统"""
+    # 验证日志级别
+    if level.upper() not in LogConfig.VALID_LEVELS:
+        raise ValueError(
+            f"Invalid log level: {level}. Must be one of {LogConfig.VALID_LEVELS}"
         )
 
-    # Add console renderer
-    console_processors.append(structlog.dev.ConsoleRenderer(colors=False))
+    # 移除默认处理器
+    logger.remove()
 
-    # Configure structlog for console output
-    structlog.configure(
-        processors=console_processors,
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        wrapper_class=structlog.stdlib.BoundLogger,  # type: ignore[arg-type]
-        cache_logger_on_first_use=True,
-    )
+    # 环境区分配置
+    if environment == "production":
+        # 生产环境：只输出到文件，JSON格式，诊断信息关闭
+        # 使用项目根目录的 logs 文件夹，与 manage.sh 保持一致
+        log_dir_path = (
+            Path(log_dir) if log_dir else Path(__file__).parent.parent.parent / "logs"
+        )
+        log_dir_path.mkdir(parents=True, exist_ok=True)
 
-    # Decide whether to enable ANSI colors based on TTY and env flags
-    try:
-        is_tty = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
-    except Exception:
-        is_tty = False
-    env_no_color = os.environ.get("NO_COLOR") or os.environ.get("ANP_NO_COLOR")
-    console_colors_enabled = bool(enable_console_colors and is_tty and not env_no_color)
+        today = datetime.now(LogConfig.TIMEZONE).strftime("%Y%m%d")
+        log_file = log_dir_path / f"anp_proxy_{today}.log"
 
-    # Add console handler with color support (disabled for non-TTY or NO_COLOR)
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(level)
-
-    if console_colors_enabled:
-        console_handler.setFormatter(ColoredFormatter("%(message)s"))
+        logger.add(
+            str(log_file),
+            format=LogConfig.file_formatter,
+            level=level,
+            rotation="1 day",
+            retention="30 days",
+            compression="gz",
+            encoding="utf-8",
+            backtrace=False,  # 生产环境关闭
+            diagnose=False,  # 生产环境关闭
+        )
     else:
-        console_handler.setFormatter(logging.Formatter("%(message)s"))
+        # 开发环境：控制台 + 文件输出
+        logger.add(
+            sys.stdout,
+            format=LogConfig.console_formatter,
+            level=level,
+            colorize=True,
+            backtrace=True,  # 显示完整堆栈跟踪
+            diagnose=True,  # 显示变量值
+        )
 
-    root_logger.addHandler(console_handler)
+        # 文件输出 - 结构化，适合生产环境
+        # 使用项目根目录的 logs 文件夹，与 manage.sh 保持一致
+        log_dir_path = (
+            Path(log_dir) if log_dir else Path(__file__).parent.parent.parent / "logs"
+        )
+        log_dir_path.mkdir(parents=True, exist_ok=True)
 
-    # Add file handler with clean format (no color codes)
+        today = datetime.now(LogConfig.TIMEZONE).strftime("%Y%m%d")
+        log_file = log_dir_path / f"anp_proxy_{today}.log"
+
+        logger.add(
+            str(log_file),
+            format=LogConfig.file_formatter,
+            level=level,
+            rotation="1 day",
+            retention="30 days",
+            compression="gz",
+            encoding="utf-8",
+            backtrace=True,  # 显示完整堆栈跟踪
+            diagnose=True,  # 显示变量值
+        )
+
+
+def log_execution_time(operation_name: str = "operation"):
+    """性能监控装饰器"""
+    import asyncio
+
+    def decorator(func):
+        @wraps(func)
+        @logger.catch
+        async def async_wrapper(*args, **kwargs):
+            start = time.perf_counter()
+            result = await func(*args, **kwargs)
+            duration = round((time.perf_counter() - start) * 1000, 1)
+            logger.info(f"{operation_name} 完成", duration_ms=duration)
+            return result
+
+        @wraps(func)
+        @logger.catch
+        def sync_wrapper(*args, **kwargs):
+            start = time.perf_counter()
+            result = func(*args, **kwargs)
+            duration = round((time.perf_counter() - start) * 1000, 1)
+            logger.info(f"{operation_name} 完成", duration_ms=duration)
+            return result
+
+        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
+
+    return decorator
+
+
+@contextmanager
+def log_operation(operation_name: str, **context):
+    """上下文管理器版本的操作日志"""
+    start = time.perf_counter()
+    ctx_logger = logger.bind(operation=operation_name, **context)
+
     try:
-        file_handler = logging.FileHandler(log_file, encoding="utf-8")
-        file_handler.setLevel(level)
-
-        # Create a clean formatter for file output that removes color codes
-        class CleanFormatter(logging.Formatter):
-            def format(self, record):
-                # Remove ANSI color codes from the message
-                import re
-
-                ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
-                if hasattr(record, "msg"):
-                    record.msg = ansi_escape.sub("", str(record.msg))
-                return super().format(record)
-
-        file_handler.setFormatter(CleanFormatter("%(message)s"))
-        root_logger.addHandler(file_handler)
-
-        logger = structlog.get_logger("setup")
-        logger.info("Logging to file", log_file=log_file)
-
+        yield ctx_logger
+        duration = round((time.perf_counter() - start) * 1000, 1)
+        ctx_logger.info(f"{operation_name} 完成", duration_ms=duration)
     except Exception as e:
-        logger = structlog.get_logger("setup")
-        logger.error("Failed to set up file logging", log_file=log_file, error=str(e))
+        duration = round((time.perf_counter() - start) * 1000, 1)
+        ctx_logger.error(f"{operation_name} 失败", error=str(e), duration_ms=duration)
+        raise
 
 
-def setup_logging_with_config(
-    config: LogConfig,
-    force_reconfigure: bool = False,
-) -> None:
-    """
-    Configure structured logging for ANP Proxy using LogConfig.
-
-    Args:
-        config: Logging configuration
-        force_reconfigure: Whether to force reconfiguration even if already configured
-    """
-    global _logging_initialized
-
-    # Configure standard library logging
-    root_logger = logging.getLogger()
-    level = getattr(logging, config.level)
-
-    # Check if already configured
-    if not force_reconfigure and root_logger.handlers:
-        # Already configured, just update level if needed
-        root_logger.setLevel(level)
-        return
-
-    root_logger.setLevel(level)
-
-    # Remove existing handlers only if force_reconfigure is True
-    if force_reconfigure:
-        for handler in root_logger.handlers[:]:
-            root_logger.removeHandler(handler)
-
-    # Create formatters; ensure filename and line number are included
-    log_format = config.format
-    has_filename = "%(filename)" in log_format
-    has_lineno = "%(lineno)" in log_format
-    if not (has_filename and has_lineno):
-        if "%(message)s" in log_format:
-            log_format = log_format.replace(
-                "%(message)s", "%(filename)s:%(lineno)d: %(message)s"
-            )
-        else:
-            # Fallback: append location info
-            log_format = f"{log_format} %(filename)s:%(lineno)d"
-
-    # Add newline to format
-    log_format = log_format + "\n"
-
-    formatter = logging.Formatter(log_format, datefmt="%Y-%m-%d %H:%M:%S")  # noqa: F841
-    colored_formatter = ColoredFormatter(log_format, datefmt="%Y-%m-%d %H:%M:%S")
-
-    # Console handler with colors
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(level)
-    console_handler.setFormatter(colored_formatter)
-    root_logger.addHandler(console_handler)
-
-    # File handler (optional)
-    if config.file:
-        try:
-            config.file.parent.mkdir(parents=True, exist_ok=True)
-
-            # Parse max_size (e.g., "10MB" -> 10*1024*1024)
-            max_bytes = _parse_size(config.max_size)
-
-            file_handler = logging.handlers.RotatingFileHandler(
-                filename=config.file,
-                maxBytes=max_bytes,
-                backupCount=config.backup_count,
-                encoding="utf-8",
-            )
-            file_handler.setLevel(level)
-
-            # Create a clean formatter for file output that removes color codes
-            class CleanFormatter(logging.Formatter):
-                def format(self, record):
-                    # Remove ANSI color codes from the message
-                    import re
-
-                    ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
-                    if hasattr(record, "msg"):
-                        record.msg = ansi_escape.sub("", str(record.msg))
-                    return super().format(record)
-
-            file_handler.setFormatter(
-                CleanFormatter(log_format, datefmt="%Y-%m-%d %H:%M:%S")
-            )
-            root_logger.addHandler(file_handler)
-
-            logger = structlog.get_logger("setup")
-            logger.info("Logging to file", log_file=str(config.file))
-
-        except Exception as e:
-            logger = structlog.get_logger("setup")
-            logger.error(
-                "Failed to set up file logging", log_file=str(config.file), error=str(e)
-            )
-
-    # Configure structlog
-    structlog.configure(
-        processors=[
-            structlog.stdlib.filter_by_level,
-            structlog.stdlib.add_log_level,
-            structlog.processors.TimeStamper(fmt="ISO"),
-            structlog.processors.format_exc_info,
-            structlog.processors.UnicodeDecoder(),
-            structlog.processors.JSONRenderer(),
-        ],
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        wrapper_class=structlog.stdlib.BoundLogger,  # type: ignore[arg-type]
-        cache_logger_on_first_use=True,
-    )
-
-    _logging_initialized = True
-
-
-def setup_enhanced_logging(
-    level: str | int = "INFO",
-    log_file: str | None = None,
-    include_location: bool = True,
-    enable_console_colors: bool = True,
-    force_reconfigure: bool = False,
-) -> None:
-    """
-    Enhanced logging setup function for main entry modules.
-
-    This function is designed to be used in main entry modules as specified in workspace rules.
-    It provides a simplified interface for setting up logging with sensible defaults.
-
-    Args:
-        level: The logging level as string or int
-        log_file: The log file path, default is None (auto-generated)
-        include_location: Whether to include filename and line number
-        enable_console_colors: Whether to enable colored console output
-        force_reconfigure: Whether to force reconfiguration even if already configured
-    """
-    # Convert string level to int if needed
-    if isinstance(level, str):
-        level = getattr(logging, level.upper())
-
-    # Call the existing setup_logging function
-    setup_logging(
-        level=level,
-        log_file=log_file,
-        include_location=include_location,
-        enable_console_colors=enable_console_colors,
-        force_reconfigure=force_reconfigure,
-    )
-
-
-def _ensure_logging_initialized(level: int | None = None) -> None:
-    """Ensure logging is initialized only once."""
-    global _logging_initialized, _default_log_level
-
-    if not _logging_initialized:
-        init_level = level if level is not None else _default_log_level
-        setup_logging(level=init_level, include_location=True)
-        _logging_initialized = True
-
-
-def set_default_log_level(level: int) -> None:
-    """Set the default log level for automatic initialization."""
-    global _default_log_level
-    _default_log_level = level
-
-
-def _parse_size(size_str: str) -> int:
-    """
-    Parse size string like '10MB' to bytes.
-
-    Args:
-        size_str: Size string (e.g., "10MB", "1GB")
-
-    Returns:
-        Size in bytes
-    """
-    size_str = size_str.upper().strip()
-
-    if size_str.endswith("KB"):
-        return int(size_str[:-2]) * 1024
-    elif size_str.endswith("MB"):
-        return int(size_str[:-2]) * 1024 * 1024
-    elif size_str.endswith("GB"):
-        return int(size_str[:-2]) * 1024 * 1024 * 1024
-    elif size_str.endswith("B"):
-        return int(size_str[:-1])
-    else:
-        # Assume bytes if no unit
-        return int(size_str)
-
-
-def get_logger(name: str, level: int | None = None) -> structlog.BoundLogger:
-    """
-    Get a structlog logger with the specified name.
-
-    Args:
-        name: The name of the logger
-        level: Optional logging level for initialization
-
-    Returns:
-        A structlog BoundLogger instance
-    """
-    _ensure_logging_initialized(level)
-    return structlog.get_logger(name)
-
-
-class LoggerMixin:
-    """Mixin class to add logging capabilities."""
-
-    @property
-    def logger(self) -> structlog.BoundLogger:
-        """Get logger for this class."""
-        if not hasattr(self, "_logger"):
-            self._logger = get_logger(self.__class__.__module__)
-        return self._logger
-
-
-# Pre-configured loggers for common components
-protocol_logger = get_logger("anp_proxy.protocol")
-gateway_logger = get_logger("anp_proxy.gateway")
-
-message_logger = get_logger("anp_proxy.message")
-auth_logger = get_logger("anp_proxy.auth")
-database_logger = get_logger("anp_proxy.database")
-common_logger = get_logger("anp_proxy.common")
-
-# Auto-initialize logging when this module is imported
-_ensure_logging_initialized()
-
-
-# Usage Examples:
-#
-# 1. Basic usage:
-#    from anp_proxy.common.log_base import get_logger
-#    logger = get_logger(__name__)
-#    logger.info("Processing request", request_id="123", method="GET")
-#
-# 2. Using LoggerMixin:
-#    from anp_proxy.common.log_base import LoggerMixin
-#    class MyClass(LoggerMixin):
-#        def my_method(self):
-#            self.logger.info("Method called", param="value")
-#
-# 3. Using pre-configured loggers:
-#    from anp_proxy.common.log_base import message_logger
-#    message_logger.error("Failed to send message", error="timeout")
-#
-# 4. Exception logging:
-#    try:
-#        # some operation
-#        pass
-#    except Exception as e:
-#        logger.exception("Operation failed", operation="data_processing")
-#
-# 5. Enhanced logging setup in main entry modules:
-#    from anp_proxy.common.log_base import setup_enhanced_logging
-#    setup_enhanced_logging(level="DEBUG", log_file="app.log")
-#
-# 6. Using LogConfig for advanced configuration:
-#    from anp_proxy.common.log_base import setup_logging_with_config
-#    from anp_proxy.common.config import LogConfig
-#    config = LogConfig(level="DEBUG", file=Path("debug.log"))
-#    setup_logging_with_config(config)
+__all__ = [
+    "setup_logging",
+    "log_execution_time",
+    "log_operation",
+    "logger",
+]

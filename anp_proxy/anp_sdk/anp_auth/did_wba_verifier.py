@@ -121,9 +121,7 @@ class DidWbaVerifier:
     # ------------------------
     async def _handle_did_auth(self, authorization: str, domain: str) -> dict[str, Any]:
         logger.info(
-            "Processing DID WBA authentication - domain: %s, Authorization header: %s",
-            domain,
-            authorization,
+            f"Processing DID WBA authentication - domain: {domain}, Authorization header: {authorization}"
         )
 
         # Extract header parts
@@ -136,9 +134,7 @@ class DidWbaVerifier:
         # Unpack order: (did, nonce, timestamp, verification_method, signature)
         did, nonce, timestamp, verification_method, signature = header_parts
         logger.info(
-            "Processing DID WBA authentication - DID: %s, Verification Method: %s",
-            did,
-            verification_method,
+            f"Processing DID WBA authentication - DID: {did}, Verification Method: {verification_method}"
         )
 
         # Verify timestamp
@@ -147,7 +143,7 @@ class DidWbaVerifier:
 
         # Verify nonce validity (external preferred; falls back to internal)
         if not await self._is_valid_server_nonce(did, nonce):
-            logger.error("Invalid or expired nonce: %s", nonce)
+            logger.error(f"Invalid or expired nonce: {nonce}")
             raise DidWbaVerifierError("Invalid or expired nonce", status_code=401)
 
         # Resolve DID document
@@ -155,10 +151,10 @@ class DidWbaVerifier:
         if not did_document:
             raise DidWbaVerifierError("Failed to resolve DID document", status_code=401)
 
-        logger.info("Successfully resolved DID document: %s", did)
-        logger.info("DID document: %s", did_document)
-        logger.info("Domain: %s", domain)
-        logger.info("Authorization: %s", authorization)
+        logger.info(f"Successfully resolved DID document: {did}")
+        logger.info(f"DID document: {did_document}")
+        logger.info(f"Domain: {domain}")
+        logger.info(f"Authorization: {authorization}")
 
         # Verify signature
         try:

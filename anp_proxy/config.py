@@ -8,10 +8,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-try:
-    import rtoml  # type: ignore
-except Exception:  # pragma: no cover - optional at runtime
-    rtoml = None  # type: ignore
+import rtoml
 
 
 def _load_toml() -> dict:

@@ -85,13 +85,13 @@ agent_connect  # 提供 DID-WBA 的头部构造与验签、DID 文档解析等
 ```python
 # app.py
 from fastapi import FastAPI
-from anp_proxy.common.log_base import setup_enhanced_logging
+from anp_proxy.common.log_base import setup_logging
 from anp_proxy.anp_sdk.anp_auth.auth_middleware import auth_middleware
 
 
 def create_app() -> FastAPI:
     # Initialize logging
-    setup_enhanced_logging()
+    setup_logging()
 
     app = FastAPI()
 
@@ -131,12 +131,12 @@ app = create_app()
 import asyncio
 import aiohttp
 from agent_connect.authentication import DIDWbaAuthHeader
-from anp_proxy.common.log_base import setup_enhanced_logging
+from anp_proxy.common.log_base import setup_logging
 
 
 async def main():
     # Initialize logging
-    setup_enhanced_logging()
+    setup_logging()
 
     # Paths to DID document and private key
     did_document_path = "./did.json"
@@ -177,12 +177,12 @@ if __name__ == "__main__":
 ```python
 # client_anp.py
 import asyncio
-from anp_proxy.common.log_base import setup_enhanced_logging
+from anp_proxy.common.log_base import setup_logging
 from anp_proxy.anp_sdk.anp_crawler.anp_client import ANPClient
 
 
 async def main():
-    setup_enhanced_logging()
+    setup_logging()
 
     client = ANPClient(
         did_document_path="./did.json",
@@ -206,12 +206,12 @@ if __name__ == "__main__":
 ```python
 # did_bootstrap.py
 import asyncio
-from anp_proxy.common.log_base import setup_enhanced_logging
+from anp_proxy.common.log_base import setup_logging
 from anp_proxy.anp_sdk.anp_auth.did_auth import generate_or_load_did
 
 
 async def main():
-    setup_enhanced_logging()
+    setup_logging()
 
     # unique_id 可选，用于区分不同用户的 DID 存储目录
     did_document, keys, did_dir = await generate_or_load_did(unique_id="user01")
@@ -258,12 +258,12 @@ if __name__ == "__main__":
 ```python
 # server_minimal.py
 from fastapi import FastAPI
-from anp_proxy.common.log_base import setup_enhanced_logging
+from anp_proxy.common.log_base import setup_logging
 from anp_proxy.anp_sdk.anp_auth.auth_middleware import auth_middleware
 
 
 app = FastAPI()
-setup_enhanced_logging()
+setup_logging()
 app.middleware("http")(auth_middleware)
 
 

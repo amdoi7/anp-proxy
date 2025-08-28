@@ -13,12 +13,7 @@ from collections.abc import Callable
 from fastapi import Request, Response
 from starlette.responses import JSONResponse
 
-try:
-    from ..common.log_base import get_logger
-except ImportError:
-    from anp_proxy.common.log_base import get_logger
-
-logger = get_logger(__name__)
+from ..common.log_base import logger
 
 
 class SecurityMiddleware:

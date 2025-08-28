@@ -15,6 +15,7 @@ repos:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix, --ignore=E402]
       - id: ruff-format
+        args: [--preview]
 
   - repo: https://github.com/astral-sh/uv-pre-commit
     rev: 0.8.9

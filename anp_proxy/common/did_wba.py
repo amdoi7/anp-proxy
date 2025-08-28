@@ -20,9 +20,7 @@ from ..anp_sdk.anp_auth.did_wba_verifier import (
     DidWbaVerifierError,
 )
 from .config import AuthConfig
-from .log_base import get_logger
-
-logger = get_logger(__name__)
+from .log_base import logger
 
 
 @dataclass

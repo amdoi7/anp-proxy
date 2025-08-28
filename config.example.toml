@@ -1,17 +1,12 @@
 # ANP Proxy Configuration Example
 
-# Operating mode: "gateway" only
-mode = "gateway"
-
 # Enable debug mode
 debug = false
 
 [logging]
-level = "INFO"
-format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-# file = "anp-proxy.log"  # Optional log file
-# max_size = "10MB"
-# backup_count = 5
+level = "INFO"              # INFO or DEBUG only
+environment = "development" # development or production
+# log_dir is optional, defaults to anp_proxy/logs
 
 [gateway]
 # HTTP server settings
@@ -20,7 +15,7 @@ port = 9877
 
 # Connection limits
 max_connections = 100
-timeout = 30.0
+timeout = 120.0          # 连接超时2分钟，使用WebSocket内置ping/pong
 keepalive_timeout = 60.0
 
 # Protocol settings
@@ -28,28 +23,15 @@ chunk_size = 65536   # 64KB
 ping_interval = 10.0
 
 [gateway.tls]
-enabled = false
-# cert_file = "server.crt"
-# key_file = "server.key"
-# ca_file = "ca.crt"
-verify_mode = "required" # none, optional, required
-
-[gateway.auth]
-enabled = true
-# shared_secret = "your-secret-key-here"
-token_expiry = 3600 # 1 hour
-max_attempts = 3
-# DID-WBA settings
-did_wba_enabled = false
+tls_verify_mode = "required"
 
 [gateway.database]
-enabled = true
-# host = "localhost"
-# port = 3306
-# user = "anp_user"
-# password = "your-secure-password"  # 🔒 SECURITY: Use environment variable ANP_DB_PASSWORD
-# database = "anp_db"
-# charset = "utf8mb4"
-# connect_timeout = 5.0
-# min_connections = 2
-# max_connections = 20
+host = "your-database-host"
+port = 3306
+user = "your-username"
+password = "your-password"
+database = "your-database"
+charset = "utf8mb4"
+connect_timeout = 5.0
+min_connections = 2
+max_connections = 20

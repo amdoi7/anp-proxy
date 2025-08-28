@@ -6,17 +6,13 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
 from ..common.did_wba import DidAuthResult
-from ..common.log_base import get_logger
-
-if TYPE_CHECKING:
-    from .server import ConnectInfo
-
-logger = get_logger(__name__)
+from ..common.log_base import logger
+from .connection import ConnectInfo
 
 
 class WebSocketHandler:
@@ -128,7 +124,8 @@ class WebSocketHandler:
                         pass
 
                 if not domain:
-                    domain = "127.0.0.1"
+                    logger.error("No valid domain found in Host or Origin headers")
+                    return DidAuthResult(success=False, error="No valid domain found")
 
             logger.info(f"Verifying DID-WBA headers for domain: {domain}")
 
